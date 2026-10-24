@@ -1264,8 +1264,7 @@ def probe_decisions(count: int) -> str:
     if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
         return "decisions: disabled"
     if not DECISIONS_GATE.is_file():
-        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a write would "
-              "skip it.", file=sys.stderr)
+        print(render_asset("gate-missing-probe.md", gate=DECISIONS_GATE), file=sys.stderr)
         return "decisions: skipped (gate script missing)"
     if not (DECISIONS_GATE.parent / "redact.py").is_file():
         print(render_asset("gate-redactor-refusal.md"), file=sys.stderr)
@@ -1317,18 +1316,15 @@ def _ledger_disclosures(report: dict) -> list[str]:
     lines = []
     reset = report.get("ledgerReset")
     if reset is True or (isinstance(reset, str) and reset.strip()):
-        lines.append("decisions: attempt ledger was unreadable and restarted empty; every record's "
-                     "attempt budget restarts")
+        lines.append(render_asset("ledger-restarted.md"))
     evicted = report.get("ledgerEvicted")
     if isinstance(evicted, int) and not isinstance(evicted, bool) and evicted > 0:
         noun = "entry" if evicted == 1 else "entries"
-        lines.append(f"decisions: attempt ledger evicted {evicted} {noun} past its cap; those "
-                     "records' attempt budgets restart")
+        lines.append(render_asset("ledger-evicted.md", count=evicted, noun=noun))
     purged = report.get("ledgerIndexPurged")
     if isinstance(purged, int) and not isinstance(purged, bool) and purged > 0:
         noun = "entry" if purged == 1 else "entries"
-        lines.append(f"decisions: attempt ledger dropped {purged} positional index {noun} left by "
-                     "a prior bug; those positions are scorable again")
+        lines.append(render_asset("ledger-index-purged.md", count=purged, noun=noun))
     return lines
 
 
@@ -1354,8 +1350,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
     if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
         return candidates, "decisions: disabled"
     if not DECISIONS_GATE.is_file():
-        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; the gate was "
-              "skipped and the export continued.", file=sys.stderr)
+        print(render_asset("gate-missing-export.md", gate=DECISIONS_GATE), file=sys.stderr)
         return candidates, "decisions: skipped (gate script missing)"
 
     # Precedence: the environment override first, then the path the caller derived, then the stable
@@ -1383,8 +1378,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
         # unreachable one — so every candidate is kept and the reason is stated. Without this the export
         # waited on the subprocess forever, contradicting the contract this function's own docstring
         # states. It is never a refusal: nothing about a timeout means content would go uninspected.
-        print(f"NOTE: the decision gate did not answer within {GATE_TIMEOUT_SECONDS}s; the gate was "
-              "skipped and the export continued.", file=sys.stderr)
+        print(render_asset("gate-timeout-note.md", seconds=GATE_TIMEOUT_SECONDS), file=sys.stderr)
         return candidates, f"decisions: skipped (gate timed out after {GATE_TIMEOUT_SECONDS}s)"
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "no detail"
@@ -1394,15 +1388,13 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
             print(render_asset("gate-misconfigured-refusal.md", detail=detail), file=sys.stderr)
             return candidates, DECISIONS_REFUSED
-        print(f"NOTE: the decision gate failed ({detail}); the gate was skipped and the export "
-              "continued.", file=sys.stderr)
+        print(render_asset("gate-failed-note.md", detail=detail), file=sys.stderr)
         return candidates, "decisions: skipped (gate failed)"
 
     try:
         report = json.loads(proc.stdout)
     except ValueError:
-        print("NOTE: the decision gate returned unreadable output; the gate was skipped and the "
-              "export continued.", file=sys.stderr)
+        print(render_asset("gate-unreadable-output-note.md"), file=sys.stderr)
         return candidates, "decisions: skipped (unreadable output)"
     if not isinstance(report, dict):
         # Readable JSON of a shape this client cannot interpret — a list, a string, a number — is
@@ -1411,8 +1403,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
         # a traceback. The `records` guard below handles the same case one level down; this is the
         # same rule at the top: keep every candidate and say why, never flatten the unknown into a
         # plausible answer and never stop a capture over it.
-        print("NOTE: the decision gate returned an unrecognised report shape; the gate was skipped "
-              "and the export continued.", file=sys.stderr)
+        print(render_asset("gate-unrecognised-report-note.md"), file=sys.stderr)
         return candidates, "decisions: skipped (unrecognised report)"
 
     for line in _ledger_disclosures(report):
@@ -1435,8 +1426,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
     # (issue 179). A value this client cannot read is not guessed at.
     below = report.get("belowThreshold")
     if below not in ("hold", "mark"):
-        print(f"NOTE: the decision gate reported no usable belowThreshold ({below!r}); the gate was "
-              "skipped and the export continued.", file=sys.stderr)
+        print(render_asset("gate-bad-below-threshold-note.md", below=repr(below)), file=sys.stderr)
         return candidates, "decisions: skipped (unrecognised belowThreshold)"
 
     # **Every candidate survives unless a score says otherwise.** The list is built by walking the
@@ -1448,8 +1438,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
     # already follow here: anything unrecognised is reported, never flattened into a plausible answer.
     records = report.get("records")
     if not isinstance(records, list):
-        print(f"NOTE: the decision gate returned no usable 'records' list "
-              f"({report.get('outcome')!r}); the gate was skipped and the export continued.",
+        print(render_asset("gate-bad-records-note.md", outcome=repr(report.get("outcome"))),
               file=sys.stderr)
         return candidates, "decisions: skipped (unrecognised report)"
 
@@ -2585,8 +2574,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         decision_note = probe_decisions(len(clean))
         held_verdicts = []
     if decision_note == DECISIONS_REFUSED:
-        print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
-              "written; fix the gate or export without it.", file=sys.stderr)
+        print(render_asset("gate-refused-export.md"), file=sys.stderr)
         return 1
 
     # The gate's below-threshold holds, under `hold`, are held candidates too and go to the same queue.
@@ -2623,8 +2611,8 @@ def cmd_export(args: argparse.Namespace) -> int:
         print(f"  would propose: up to {len(held)} held as Status=proposed "
               f"(duplicates stay queue-file-only)")
     if held_verdicts:
-        print(f"  {len(held_verdicts)} also held by the decision gate (below threshold) -> "
-              f"{_review_queue_path()}")
+        print(render_asset("gate-held-count.md", count=len(held_verdicts),
+                           queue=_review_queue_path()))
     if total_chunks > 1:
         print(f"Split into {total_chunks} batch(es) of at most {MAX_CANDIDATES} candidates: "
               + ", ".join(str(len(c)) for c in chunks) + ".")

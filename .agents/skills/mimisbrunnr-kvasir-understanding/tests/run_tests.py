@@ -5525,6 +5525,42 @@ class SkillAssetTests(unittest.TestCase):
         ("gate-misconfigured-refusal.md", {"detail": "bad-decisions-config"}, (
             "REFUSED: the decision gate is misconfigured (bad-decisions-config). "
             "Nothing was written.")),
+        ("gate-missing-probe.md", {"gate": "G"}, (
+            "NOTE: the decision gate is enabled but G is missing; a write would skip it.")),
+        ("gate-missing-export.md", {"gate": "G"}, (
+            "NOTE: the decision gate is enabled but G is missing; the gate was skipped and the "
+            "export continued.")),
+        ("gate-timeout-note.md", {"seconds": 30}, (
+            "NOTE: the decision gate did not answer within 30s; the gate was skipped and the export "
+            "continued.")),
+        ("gate-failed-note.md", {"detail": "D"}, (
+            "NOTE: the decision gate failed (D); the gate was skipped and the export continued.")),
+        ("gate-unreadable-output-note.md", {}, (
+            "NOTE: the decision gate returned unreadable output; the gate was skipped and the export "
+            "continued.")),
+        ("gate-unrecognised-report-note.md", {}, (
+            "NOTE: the decision gate returned an unrecognised report shape; the gate was skipped and "
+            "the export continued.")),
+        ("gate-bad-below-threshold-note.md", {"below": "None"}, (
+            "NOTE: the decision gate reported no usable belowThreshold (None); the gate was skipped "
+            "and the export continued.")),
+        ("gate-bad-records-note.md", {"outcome": "'ok'"}, (
+            "NOTE: the decision gate returned no usable 'records' list ('ok'); the gate was skipped "
+            "and the export continued.")),
+        ("gate-refused-export.md", {}, (
+            "REFUSED: the decision gate refused this export (the reason is above). Nothing was "
+            "written; fix the gate or export without it.")),
+        ("gate-held-count.md", {"count": 2, "queue": "/q"}, (
+            "  2 also held by the decision gate (below threshold) -> /q")),
+        ("ledger-restarted.md", {}, (
+            "decisions: attempt ledger was unreadable and restarted empty; every record's attempt "
+            "budget restarts")),
+        ("ledger-evicted.md", {"count": 2, "noun": "entries"}, (
+            "decisions: attempt ledger evicted 2 entries past its cap; those records' attempt "
+            "budgets restart")),
+        ("ledger-index-purged.md", {"count": 2, "noun": "entries"}, (
+            "decisions: attempt ledger dropped 2 positional index entries left by a prior bug; "
+            "those positions are scorable again")),
         ("session-marker-note.md", {"error": "E"}, (
             "NOTE: session marker not written (E).")),
         ("initiative-create-hint.md", {"initiative": "core", "write_client": "WRITE"}, (
