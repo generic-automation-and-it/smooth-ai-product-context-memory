@@ -71,6 +71,9 @@ _SKILL_SCRIPTS = _SKILL_ROOT / "scripts"
 # caller loads (HLD-010; the skills root `AGENTS.md`). One message per file, `.md` for prose, and the
 # file body is the printed text verbatim apart from a single trailing newline.
 _SKILL_ASSETS = _SKILL_ROOT / "assets"
+# The loader below is a copy of the gate's, deliberately: the gate declares `stdlib only` and ships
+# alone inside a plugin copy, so sharing one would still leave two copies — and this client already
+# imports the shared folder for the session marker, which is not a reason to couple it to the gate.
 REDACTOR = _SHARED_SCRIPTS / "redact.py"
 ATOMICITY = _SHARED_SCRIPTS / "atomicity.py"
 READ_CLIENT = _SHARED_SCRIPTS / "context_memory_read_client.py"

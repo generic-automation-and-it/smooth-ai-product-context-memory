@@ -80,6 +80,10 @@ RUBRIC = SCRIPTS / "decisions_rubric.json"
 # the same bytes duplicated for no caller. `ai-understanding` ships its own byte-identical copy of
 # this script and therefore of this folder, held by `parity_decisions_gate.py`. Skill-owned prose
 # stays in the skill's own `assets/` (skills root `AGENTS.md`).
+#
+# The loader below is deliberately duplicated in `mimisbrunnr-kvasir-understanding`'s client rather
+# than imported: this file declares `stdlib only` and ships alone inside a plugin copy, so a shared
+# loader would have to be a WET copy here anyway.
 ASSETS = SCRIPTS / "assets"
 
 
