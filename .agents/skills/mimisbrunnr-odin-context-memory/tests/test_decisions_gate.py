@@ -2634,5 +2634,38 @@ class SnapshotTests(GateTestCase):
             self.score()
             self.assertEqual(before, set(Path(tmp).iterdir()))
 
+class GateAssetTests(unittest.TestCase):
+    """The gate's own prose lives in `scripts/assets/`, beside the script that prints it.
+
+    Pinned here because the WET copy in `ai-understanding` is only as good as the parity harness
+    says: a wording change is a deliberate edit in both, never a silent one.
+    """
+
+    def test_the_ledger_warning_is_byte_identical(self):
+        self.assertEqual(
+            "WARNING: attempt ledger /l.json unreadable; moved aside to /l.json.corrupt-1 and "
+            "starting fresh (earlier attempt budgets no longer apply).",
+            _gate.render_asset("gate-ledger-warning.md", path="/l.json",
+                               aside="/l.json.corrupt-1"))
+
+    def test_the_snapshot_note_is_byte_identical(self):
+        self.assertEqual(
+            "NOTE: the run snapshot at /s.json was not written (denied); the verdicts below are "
+            "unaffected.",
+            _gate.render_asset("gate-snapshot-note.md", snapshot="/s.json", error="denied"))
+
+    def test_a_missing_or_corrupt_asset_is_a_named_refusal(self):
+        """A broken install refuses by name; a non-UTF-8 file is `asset-unreadable`, not a traceback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(_gate, "ASSETS", Path(tmp)):
+                with self.assertRaises(_gate.AssetUnavailable) as missing:
+                    _gate.read_asset("nope.md")
+                self.assertEqual("asset-missing: nope.md", str(missing.exception))
+                (Path(tmp) / "bad.md").write_bytes(b"\xff\xfe")
+                with self.assertRaises(_gate.AssetUnavailable) as unreadable:
+                    _gate.read_asset("bad.md")
+                self.assertEqual("asset-unreadable: bad.md", str(unreadable.exception))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

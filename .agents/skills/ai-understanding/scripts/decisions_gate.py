@@ -75,6 +75,58 @@ ENV_LEDGER_MAX = "CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES"
 SCRIPTS = Path(__file__).resolve().parent
 REDACTOR = SCRIPTS / "redact.py"
 RUBRIC = SCRIPTS / "decisions_rubric.json"
+# User-facing prose this shared script prints. It lives beside the script, not in a skill's folder:
+# the gate is used by every `mimisbrunnr-*` skill through this one file, so a per-skill copy would be
+# the same bytes duplicated for no caller. `ai-understanding` ships its own byte-identical copy of
+# this script and therefore of this folder, held by `parity_decisions_gate.py`. Skill-owned prose
+# stays in the skill's own `assets/` (skills root `AGENTS.md`).
+ASSETS = SCRIPTS / "assets"
+
+
+class AssetUnavailable(Exception):
+    """A message this script loads was absent, unreadable, empty, or did not resolve as a whole."""
+
+
+_PLACEHOLDER = re.compile(r"\{\{([^{}]*)\}\}")
+
+
+def read_asset(name: str) -> str:
+    """Read one message from `scripts/assets/`, or raise `AssetUnavailable`.
+
+    Fail-closed on every path, and the error names the file, never its body.
+    """
+    path = ASSETS / name
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise AssetUnavailable(f"asset-missing: {name}") from None
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError is a ValueError, not an OSError — without it a corrupt asset escapes.
+        raise AssetUnavailable(f"asset-unreadable: {name}") from None
+    if text.endswith("\n"):
+        text = text[:-1]
+    if not text.strip():
+        raise AssetUnavailable(f"asset-empty: {name}")
+    return text
+
+
+def render_asset(name: str, **values: object) -> str:
+    """Read an asset and fill its `{{name}}` placeholders in one pass.
+
+    A value is inserted verbatim and never re-scanned, so one that contains `{{…}}` prints literally
+    instead of filling another placeholder. A placeholder with no value is a refusal, not a
+    half-filled message.
+    """
+    text = read_asset(name)
+
+    def fill(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in values:
+            raise AssetUnavailable(f"asset-placeholder-unfilled: {name} ({match.group(0)})")
+        return str(values[key])
+
+    return _PLACEHOLDER.sub(fill, text)
+
 
 # The settings are read from the process environment only. `scripts/run.sh` publishes any that are
 # missing to the operator's shell profile, so the environment is the one source of truth: a copy in a
@@ -958,9 +1010,7 @@ def quarantine_unreadable_ledger(state_file):
         os.replace(path, aside)
     except OSError:
         return None
-    print(f"WARNING: attempt ledger {path} unreadable; moved aside to {aside} "
-          f"and starting fresh (earlier attempt budgets no longer apply).",
-          file=sys.stderr)
+    print(render_asset("gate-ledger-warning.md", path=path, aside=aside), file=sys.stderr)
     return aside
 
 
@@ -1225,8 +1275,8 @@ def cmd_score(args):
             write_snapshot(args.snapshot_file, snapshot_payload(payload), args.state_file)
         except OSError as exc:
             payload["snapshotError"] = f"{type(exc).__name__}: {exc}"
-            print(f"NOTE: the run snapshot at {args.snapshot_file} was not written ({exc}); the "
-                  f"verdicts below are unaffected.", file=sys.stderr)
+            print(render_asset("gate-snapshot-note.md", snapshot=args.snapshot_file, error=exc),
+                  file=sys.stderr)
     print(json.dumps(payload, indent=2))
     return 0
 
@@ -1290,6 +1340,10 @@ def main():
         sys.exit(args.func(args))
     except GateError as exc:
         print(json.dumps({"outcome": exc.outcome, "detail": exc.detail}, indent=2), file=sys.stderr)
+        sys.exit(1)
+    except AssetUnavailable as exc:
+        # A broken install, not a caller mistake: name the file and stop.
+        print(f"REFUSED: {exc}. Nothing was written.", file=sys.stderr)
         sys.exit(1)
 
 
