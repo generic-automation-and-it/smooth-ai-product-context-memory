@@ -2666,6 +2666,37 @@ class GateAssetTests(unittest.TestCase):
                     _gate.read_asset("bad.md")
                 self.assertEqual("asset-unreadable: bad.md", str(unreadable.exception))
 
+    def test_a_broken_install_refuses_by_name_at_the_process_boundary(self):
+        """Raising is half the contract: `main` must turn it into a named refusal and exit 1.
+
+        Driven through `main`, not the helper, because the helper is the part that already had a
+        test — the translation is what a caller actually sees.
+        """
+        with mock.patch.object(
+                _gate, "cmd_probe",
+                side_effect=_gate.AssetUnavailable("asset-missing: gate-snapshot-note.md")), \
+                mock.patch.object(sys, "argv", ["decisions_gate", "probe"]):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as exit_:
+                _gate.main()
+        self.assertEqual(1, exit_.exception.code)
+        self.assertIn("REFUSED: asset-missing: gate-snapshot-note.md. Nothing was written.",
+                      err.getvalue())
+
+    def test_every_asset_is_loaded_and_every_load_names_an_asset(self):
+        """Both directions: an orphan file is dead weight, a dangling name is a refusal at runtime.
+
+        The parity harness compares the copy's file set with the original's, so an asset added here
+        and never loaded would be copied outward and pass parity while doing nothing.
+        """
+        loaded = set()
+        for script in sorted(_gate.ASSETS.parent.glob("*.py")):
+            loaded.update(re.findall(r'(?:read|render)_asset\(\s*"([^"]+)"',
+                                     script.read_text("utf-8")))
+        on_disk = {p.name for p in _gate.ASSETS.iterdir() if p.is_file()}
+        self.assertEqual(set(), on_disk - loaded, "asset on disk that no script loads")
+        self.assertEqual(set(), loaded - on_disk, "script names an asset that is not on disk")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
