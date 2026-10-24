@@ -993,7 +993,7 @@ def purge_positional_entries(ledger):
 
 
 def quarantine_unreadable_ledger(state_file):
-    """Move an unreadable ledger aside for inspection. Best effort, never fatal.
+    """Move an unreadable ledger aside for inspection. Best effort on the ledger move; raises AssetUnavailable when the warning asset cannot be rendered.
 
     Same rule as the session marker's corrupt-file quarantine: a reset says the budgets
     restart, but the old bytes may be worth forensics, so they stay next to the fresh
@@ -1275,8 +1275,12 @@ def cmd_score(args):
             write_snapshot(args.snapshot_file, snapshot_payload(payload), args.state_file)
         except OSError as exc:
             payload["snapshotError"] = f"{type(exc).__name__}: {exc}"
-            print(render_asset("gate-snapshot-note.md", snapshot=args.snapshot_file, error=exc),
-                  file=sys.stderr)
+            try:
+                print(render_asset("gate-snapshot-note.md", snapshot=args.snapshot_file, error=exc),
+                      file=sys.stderr)
+            except AssetUnavailable as asset_exc:
+                print(f"NOTE: the run snapshot at {args.snapshot_file} was not written ({exc}); "
+                      f"the verdicts below are unaffected. ({asset_exc})", file=sys.stderr)
     print(json.dumps(payload, indent=2))
     return 0
 
