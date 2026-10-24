@@ -14,16 +14,18 @@ Read [`README.md`](./README.md) first — skill index, switches, effort levels a
   skill-owned script may read it, while `_mimisbrunnr-shared/` owns code and a shared script never
   resolves a caller's assets (it takes an explicit path). Format is `.md` for prose and `.json` for
   structured data, never `.txt`. A skill resolves `<skill>/assets` from its own `scripts/`
-  (`parents[1] / "assets"`), loads by file name, fills `{{placeholder}}` with plain `.replace` (never
-  `string.Template`, whose `$` collides with prose), and fails closed on a missing, unreadable, empty
-  or half-filled file. Only a message that is at least three lines or used at two call sites moves out
-  of code; a one-line aside stays inline.
+  (`parents[1] / "assets"`), loads by file name, fills `{{placeholder}}` by single-pass substitution
+  (never `string.Template`, whose `$` collides with prose; a value is inserted verbatim and never
+  re-scanned, so a value containing `{{…}}` prints literally), and fails closed on a missing,
+  unreadable, empty or half-filled file. Only a message that is at least three **printed** lines or
+  used at two call sites moves out of code; a one-line aside stays inline (measure printed lines, not
+  source lines: wrapped source would qualify half the file).
 
 ## Changelog
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
-| 2026-10-24 | **The loaded-strings convention: per-skill `assets/`, no shared assets.** `mimisbrunnr-kvasir-understanding` moves its store-answer refusals, deprecated spellings and export preview/receipt prose into `assets/*.md`, loaded by one fail-closed helper; every moved message is byte-pinned. The threshold is stated with the rule — three lines or two call sites — and `mimisbrunnr-odin-context-memory` was checked and gained no folder, because its own scripts raise one-line messages once each. | this PR |
+| 2026-10-24 | **The loaded-strings convention: per-skill `assets/`, no shared assets.** `mimisbrunnr-kvasir-understanding` moves its qualifying user-facing prose into `assets/*.md` — messages of ≥3 **printed** lines, one-liners reused at ≥2 call sites, and the 10-line dump template (R4 names templates) — loaded by one fail-closed single-pass helper, with the template behind a function so a missing asset refuses from `main` instead of raising at import. Re-review moved twelve one-line one-offs back inline and added five missed qualifiers. Every asset byte-pinned. Measured in printed lines, not wrapped source lines. `mimisbrunnr-odin-context-memory` was checked and holds no `assets/` by the same bar — allowed, not excluded. | this PR |
 | 2026-10-19 | `ai-review` removed; `README.md` index, effort, naming and parent-ownership text updated | #295 |
 | 2026-10-18 | **`README.md` index, effort table, naming table and switch sections no longer list the skills #291 removed** (`agile-github-*`, `ai-terse`, `ai-template-sync`, `context-load-*`, `create-hld`, `git-*`, `manage-rule-system`), and the parent-ownership paragraph names only the parents that still own a skill here. The same removal reached `.agents/AI_DEVELOPMENT_AGENTS.md`'s folder table and `.agents/settings.json`'s `Skill(...)` allow-list. | — |
 | 2026-10-16 | **`ai-memory-context` added** — a local-first memory store. Odin's redact→dedupe→atomicity pipeline writing to `.context/context-memories/`, with no server, no network and no sibling script folder, so the whole skill ships as a single zip. Owned by this repo (not a template parent), installer-distributed with **no marketplace plugin entry** — following `ai-brain-dump`, the existing precedent for an owned skill that is not plugin-distributed. Three scripts are WET-vendored from `_mimisbrunnr-shared/` and held byte-equal by `tests/parity_shared_scripts.py`, which also fails if a vendored copy gains a `parents[2]` or `sys.path` insert. | — |
