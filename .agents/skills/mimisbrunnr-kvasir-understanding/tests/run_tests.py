@@ -5493,5 +5493,159 @@ class GateIdentityTests(unittest.TestCase):
         self.assertNotIn("durable identity", note)
 
 
+class SkillAssetTests(unittest.TestCase):
+    """The skill's own `assets/`: one message per file, loaded explicitly, fail closed.
+
+    The point of the move is that a user-facing message has one home a human can read and edit
+    without touching control flow. These cases hold the parts that make that safe: the bytes did not
+    change, a broken install refuses instead of printing a half-filled message, and the folder stays
+    local to the skill (a peer skill's or a shared folder's assets would break the zip).
+    """
+
+    # Each asset's exact text before the move, taken from the literals it replaced. A wording change
+    # is a deliberate edit in both places; a silent one fails here.
+    MOVED = [
+        ("store-unreachable.md", {}, (
+            "UNREACHABLE: nothing accepted a connection to the store. This is an operator action "
+            "(is the API running, and is CONTEXT_MEMORY_BASE_URL right?). No records were read, and "
+            "this is NOT an empty result.")),
+        ("store-timed-out.md", {}, (
+            "TIMED OUT: the store accepted the connection and did not answer within its budget. "
+            "This is a hang, NOT an empty result — a retry may succeed. Do not conclude the "
+            "knowledge does not exist.")),
+        ("store-no-records.md", {}, (
+            "NO RECORDS MATCHED: the store answered, and there is nothing under these filters. "
+            "This is an empty result, not a failure — widen the filters (`--all`, drop `--query`) "
+            "if you expected memory.")),
+        ("import-deprecated-store.md", {}, (
+            "DEPRECATED: `import <input> --store` prepared a capture payload. That direction is "
+            "now `export`; `import` reads the store INTO the session. Nothing was written.\n"
+            "  to review:  understanding_client.py export <input> --dryrun\n"
+            "  to capture: understanding_client.py export <input>")),
+        ("import-deprecated-heimdallr.md", {}, (
+            "DEPRECATED: `--heimdallr` autofill was never an inbound step; `import` binds only "
+            "what the caller passes, so a session on a ticketed branch recalls the whole "
+            "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
+            "  to review:  understanding_client.py export <input> --dryrun\n"
+            "  to capture: understanding_client.py export <input>\n"
+            "  to dump:    understanding_client.py dump --currentsession --from "
+            "<session-summary-file|->")),
+        ("gate-redactor-refusal.md", {}, (
+            "REFUSED: the decision gate's redactor could not run, so record content would have been "
+            "sent unscrubbed. Nothing was written.")),
+        ("export-scope-mixed.md", {"scoped": 7, "total": 9, "labels": "a:b"}, (
+            "REFUSED: 7 of 9 source records carry a scope (a:b) and the rest carry none, so adopting "
+            "it would re-scope the unscoped ones. Export them separately, or pass --scope to choose "
+            "one scope for all. Nothing was written.")),
+        ("export-scope-multiple.md", {"labels": "a:b, c:d"}, (
+            "REFUSED: the source records carry more than one scope (a:b, c:d), and one export writes "
+            "one group with one scope. Export each scope separately with a matching --scope. "
+            "Nothing was written.")),
+        ("export-scope-mismatch.md", {"labels": "a:b", "scope": "x:y"}, (
+            "REFUSED: the source records are scoped a:b, but this export binds scope x:y; writing "
+            "would re-scope them. Export each scope separately with a matching --scope. "
+            "Nothing was written.")),
+        ("export-preview-dry-run.md", {"total": 4, "group": ", group (dry-run)"}, (
+            "DRY RUN — nothing was written, and nothing was created.\n"
+            "  would write: memory (4), group (dry-run)\n"
+            "  would not create: anything under an existing group, because no group was resolved\n"
+            "The server-side `set --dryrun` veto runs at the start of a write, once a group exists. "
+            "Re-run without `--dryrun` to capture.")),
+        ("export-preview-matched.md", {"matched": 3}, (
+            "  3 candidate(s) matched an existing same-subject memory; a write would version those "
+            "whose match is in the export's group (a match in another group stays a separate new "
+            "memory).")),
+        ("export-preview-multi-batch.md", {}, (
+            "  Note: a multi-batch write is not atomic across batches; a later batch could be "
+            "refused at its veto after an earlier batch was already written.")),
+        ("export-preview-understanding-kind.md", {}, (
+            "Decisions and rules captured this way are written as `kind = understanding`, which does "
+            "NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path "
+            "is an understanding of one, not approved canon.")),
+        ("export-receipt-multi-batch.md", {}, (
+            "Non-atomic multi-batch write: each batch was written independently, so a failure in a "
+            "later batch leaves earlier batch(es) committed.")),
+        ("export-receipt.md", {}, (
+            "This is a receipt: the memories are persisted now, so a post-write digest is not an "
+            "opportunity to approve. Pre-write review is `export --dryrun`.")),
+        ("export-receipt-understanding-kind.md", {}, (
+            "Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "
+            "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
+            "approved canon.")),
+    ]
+
+    def test_every_moved_message_is_byte_identical_to_what_it_replaced(self):
+        """The no-behaviour-change half of the move: same bytes, same trailing newline count."""
+        for name, values, expected in self.MOVED:
+            with self.subTest(asset=name):
+                self.assertEqual(expected, uc.render_asset(name, **values))
+
+    def test_the_assets_are_the_skills_own_and_are_never_shared(self):
+        """A shared folder cannot carry prose a caller loads, and a zip has to carry its own copy."""
+        skill = Path(uc.__file__).resolve().parents[1]
+        self.assertEqual(skill / "assets", uc._SKILL_ASSETS)
+        self.assertNotIn("_mimisbrunnr-shared", str(uc._SKILL_ASSETS))
+
+    def test_no_asset_is_a_txt_file(self):
+        """R4: prose is `.md` (frontmatter, highlighting) and structured data is `.json`. No `.txt`."""
+        stray = sorted(p.name for p in uc._SKILL_ASSETS.rglob("*") if p.suffix == ".txt")
+        self.assertEqual([], stray)
+
+    def test_every_asset_is_loaded_and_every_load_names_an_asset(self):
+        """Both directions: an orphan file is dead weight, a dangling name is a refusal at runtime."""
+        loaded = set()
+        for script in sorted((uc._SKILL_ASSETS.parent / "scripts").glob("*.py")):
+            loaded.update(re.findall(r'(?:read|render)_asset\(\s*"([^"]+)"', script.read_text("utf-8")))
+        on_disk = {p.name for p in uc._SKILL_ASSETS.iterdir() if p.is_file()}
+        self.assertEqual(set(), on_disk - loaded, "asset on disk that no script loads")
+        self.assertEqual(set(), loaded - on_disk, "script names an asset that is not on disk")
+
+    def test_a_missing_or_unreadable_asset_is_a_named_refusal(self):
+        """Fail closed, and name the file: a fallback to an inline copy is the drift this prevents."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                with self.assertRaises(uc.AssetUnavailable) as missing:
+                    uc.read_asset("nope.md")
+                self.assertEqual("asset-missing: nope.md", str(missing.exception))
+                (Path(tmp) / "a-directory.md").mkdir()
+                with self.assertRaises(uc.AssetUnavailable) as unreadable:
+                    uc.read_asset("a-directory.md")
+                self.assertEqual("asset-unreadable: a-directory.md", str(unreadable.exception))
+
+    def test_an_empty_asset_is_a_refusal_not_an_empty_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "empty.md").write_text("\n", encoding="utf-8")
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                with self.assertRaises(uc.AssetUnavailable) as error:
+                    uc.read_asset("empty.md")
+        self.assertEqual("asset-empty: empty.md", str(error.exception))
+
+    def test_an_unfilled_placeholder_is_a_refusal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "half.md").write_text("count {{total}}\n", encoding="utf-8")
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                with self.assertRaises(uc.AssetUnavailable) as error:
+                    uc.render_asset("half.md")
+        self.assertIn("asset-placeholder-unfilled: half.md ({{total}})", str(error.exception))
+
+    def test_a_dollar_in_the_prose_is_not_template_syntax(self):
+        """`string.Template` would raise on `$HOME`, and the write path's docs quote that shape."""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "prose.md").write_text("Set $HOME/x and {{value}}.\n", encoding="utf-8")
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                rendered = uc.render_asset("prose.md", value="3")
+        self.assertEqual("Set $HOME/x and 3.", rendered)
+
+    def test_a_missing_asset_stops_the_client_with_a_refusal(self):
+        """End to end, not just the helper: the caller sees a refusal and exit 1, never silence."""
+        with tempfile.TemporaryDirectory() as tmp:
+            err = io.StringIO()
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)), redirect_stderr(err):
+                rc = uc.main(["import", "--store"])
+        self.assertEqual(1, rc)
+        self.assertIn("REFUSED: asset-missing: import-deprecated-store.md. Nothing was written.",
+                      err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,1 @@
+Decisions and rules captured this way are written as `kind = understanding`, which does NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not approved canon.

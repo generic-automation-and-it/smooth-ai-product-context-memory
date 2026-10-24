@@ -1,0 +1,1 @@
+REFUSED: {{scoped}} of {{total}} source records carry a scope ({{labels}}) and the rest carry none, so adopting it would re-scope the unscoped ones. Export them separately, or pass --scope to choose one scope for all. Nothing was written.

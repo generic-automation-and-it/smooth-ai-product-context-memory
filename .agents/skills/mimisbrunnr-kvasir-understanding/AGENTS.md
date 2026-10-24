@@ -12,6 +12,14 @@ Read [`SKILL.md`](./SKILL.md) first — the load, import, export and dump proced
   `CONTEXT_MEMORY_DECISIONS_ENABLED`, `CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED` and
   `CONTEXT_MEMORY_REVIEW_QUEUE` select the shared gate, dedup and review-queue behaviour; the decision key
   stays in `decisions_gate.py`, which sends it only as its bearer header.
+- **A user-facing message long enough to be prose lives in `assets/`, not in the code.** One message
+  per `.md` file, loaded by name through `read_asset`/`render_asset` in
+  `scripts/understanding_client.py` and filled with `.replace` on `{{placeholder}}`. The file body is
+  the printed text **verbatim** — one trailing newline is the file's own and is stripped — so moving a
+  message must not change a byte of stdout or stderr. A missing, unreadable, empty or half-filled file
+  is `AssetUnavailable`, which `main` turns into `REFUSED: … Nothing was written.` and exit 1: never a
+  silent inline fallback, and never the body in the error. A one-line aside stays inline (below the
+  three-line / two-call-site threshold); the skills root `AGENTS.md` holds the wider rule.
 - **A byte-identical re-export is not deduped.** `SetMemories` versions any item sent with a `uuid` and
   compares no content, and preflight returns no statement to compare, so re-exporting an unchanged subject
   writes a new empty version. Content dedup needs a server-side skip or the current statement in
@@ -49,10 +57,30 @@ These IDs are HLD-007's; `SKILL.md`, the README, the scripts and the tests cite 
   read client; `import <input> --store` is deprecated, not repurposed. An import marks the working point and
   a default export cuts at it.
 
+## Assets
+
+Strings the client loads instead of carrying inline. Every one is pinned byte-for-byte by
+`SkillAssetTests` in `tests/run_tests.py`, which also holds the loader's refusals, the no-`.txt` rule
+and both directions of the file/loader inventory.
+
+| Family | Files | Loaded by |
+| :---- | :---- | :---- |
+| Store answers that are not empty results (`import`) | `store-unreachable.md` (exit 3), `store-timed-out.md` (exit 4), `store-no-records.md` (stdout, exit 0) | `cmd_import` |
+| Deprecated spellings refused with their replacement | `import-deprecated-store.md`, `import-deprecated-heimdallr.md` | `cmd_import` |
+| Gate refusal reused at two call sites | `gate-redactor-refusal.md` | `gate_decisions`, `probe_decisions` |
+| Export scope reconciliation | `export-scope-mixed.md`, `export-scope-multiple.md`, `export-scope-mismatch.md` | `reconcile_source_scope` |
+| Export preview (`--dryrun`) | `export-preview-dry-run.md`, `export-preview-matched.md`, `export-preview-multi-batch.md`, `export-preview-understanding-kind.md` | `cmd_export` |
+| Export receipt | `export-receipt.md`, `export-receipt-multi-batch.md`, `export-receipt-understanding-kind.md` | `cmd_export` |
+
+Deliberately **not** here: the decision-gate and dedup `NOTE:` lines (one line each, one call site
+apiece), `NOT FOUND` / `NO LOADABLE MATERIAL` / `NOT A STORE EXPORT`, and the product-link notes —
+all below the threshold, so they stay beside the logic that decides them.
+
 ## Changelog
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-24 | **The client's user-facing prose moved into `assets/`, loaded by name.** Sixteen messages — the store-answer refusals, both deprecated spellings, the gate's redactor refusal, the three scope reconciliations, and the `--dryrun` preview and write receipt blocks — now live one per `.md` file and are loaded by `read_asset`/`render_asset`. Not a behaviour change: each of the sixteen was compared byte-for-byte against the literal it replaced, read back out of the pre-move source — including the gate refusal, which was a module constant rather than a `print` argument — and every one is byte-pinned in `SkillAssetTests`, which also holds the fail-closed loader (`asset-missing`, `asset-unreadable`, `asset-empty`, `asset-placeholder-unfilled`), the no-`.txt` rule and both directions of the asset/loader inventory. A broken install is a named refusal from `main`, never a half-filled message. 303 → 312 cases. | this PR |
 | 2026-10-18 | **Session-export workflow leads `SKILL.md`; entry points no longer contradict the client.** A short eight-step workflow (complete client → eligibility → authorisation → stdin dump → recall → optional preview → write → receipt) and a *Preview limits* paragraph sit before the reference sections: a preview appends held candidates to the local review queue, resolves no group, probes rather than scores the value gate, and exits 1 before group/product/preflight when every candidate is held; atomicity signals are evidence, not a split plan. Drift repaired: the skills index advertised the deprecated `--store`; the README claimed every switch defaults off (Heimdallr autofill is on for `export`/`dump`) and described product edges as initiative-or-repo; `export --help` did the same and said `--dryrun` runs "every gate"; the `import --store`/`--heimdallr` deprecations labelled a writing `export <input>` as "to review" — it now carries `--dryrun`. `SessionExportGuidanceTests` pins each of these and round-trips the workflow's own stdin example (dump → export `--dryrun`, 2 candidates, no `set`/`resolve-group`). No verb, flag, exit code or refusal order changed. | — |
 | 2026-10-17 | `export --product-name` now declares BOTH `(Product)-[:HAS_INITIATIVE]->(Initiative)` AND `(Product)-[:HAS_REPO]->(Repo)` when both anchors are bound; either alone attributes the memory (LADR-10), so a repo conflict (`409`) is reported as a NOTE and does not fail an export whose primary anchor already landed. The "initiative wins" heuristic is gone — `_product_target` returns a list and `_declare_product_link` loops | — |
 | 2026-10-16 | **The export prints the paths the gate reports, not paths it recomputes** (`Ralph` RL-001). It derived the snapshot name a second time *after* scoring returned, so the two clock reads straddled the gate and the operator was told a file that did not exist — confirmed `...184017...` printed against `...184012...` on disk, and with a real batch the gap is a minute, so it was wrong essentially every run. The gate's report is the authority on what it used. Also: the default ledger directory is spelled once (`DECISIONS_CONTEXT`), `ledger_paths` is `budget_ledger_path` because it returns one path (RL-005, RL-006), and a dead `if snapshot_file is not None` guard is gone (RL-007). 295 -> 296 cases. | Ralph loop RL-001, RL-005..007 |

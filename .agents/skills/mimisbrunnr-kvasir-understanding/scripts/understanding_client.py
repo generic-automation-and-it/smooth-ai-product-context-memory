@@ -64,7 +64,13 @@ DUMP_MARKER = ".mimisbrunnr-kvasir-understanding-dump"
 SESSION_FILE = "_session.md"
 METADATA_FILE = "_dump.json"
 UNIT_SUFFIX = ".understanding.md"
-_SKILL_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+_SKILL_ROOT = Path(__file__).resolve().parents[1]
+_SKILL_SCRIPTS = _SKILL_ROOT / "scripts"
+# This skill's own human-readable strings, never a peer skill's and never a shared folder's: an
+# `assets/` folder travels with the skill into a zip, and `_mimisbrunnr-shared` owns code, not prose a
+# caller loads (HLD-010; the skills root `AGENTS.md`). One message per file, `.md` for prose, and the
+# file body is the printed text verbatim apart from a single trailing newline.
+_SKILL_ASSETS = _SKILL_ROOT / "assets"
 REDACTOR = _SHARED_SCRIPTS / "redact.py"
 ATOMICITY = _SHARED_SCRIPTS / "atomicity.py"
 READ_CLIENT = _SHARED_SCRIPTS / "context_memory_read_client.py"
@@ -121,6 +127,58 @@ DUMP_MAX_BODY_CHARS = 60000
 # rather than inventing a score.
 _CONFIDENCE_NUMERIC = {"verified": 70, "observed": 60, "contested": 40}
 DEFAULT_CONFIDENCE = 70
+
+
+# ------------------------------------------------------------------ skill assets
+
+
+class AssetUnavailable(Exception):
+    """A message this skill loads was absent, unreadable, empty, or did not resolve as a whole.
+
+    Raised rather than falling back to an inline copy: a message that lives in a file has one home,
+    and a silent fallback would let a broken install drift from that file without a trace. `main`
+    turns it into a refusal, so the failure is named and the caller stops.
+    """
+
+
+_PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}")
+
+
+def read_asset(name: str) -> str:
+    """Read one message from this skill's `assets/`, or raise `AssetUnavailable`.
+
+    Fail-closed on every path: a missing file, an unreadable one and an empty one are one class of
+    failure. The error names the file and never its body, so no message content reaches a log.
+    """
+    path = _SKILL_ASSETS / name
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise AssetUnavailable(f"asset-missing: {name}") from None
+    except OSError:
+        raise AssetUnavailable(f"asset-unreadable: {name}") from None
+    if text.endswith("\n"):
+        text = text[:-1]
+    if not text.strip():
+        raise AssetUnavailable(f"asset-empty: {name}")
+    return text
+
+
+def render_asset(name: str, **values: object) -> str:
+    """Read an asset and fill its `{{name}}` placeholders, or raise `AssetUnavailable`.
+
+    Plain `.replace` per name, deliberately: `string.Template` would read a `$` in the prose as
+    syntax, and the write path's own documentation quotes `$HOME`-shaped text. A placeholder left
+    without a value is the same refusal as a missing file — a half-filled message reads as a whole
+    one, which is worse than stopping.
+    """
+    text = read_asset(name)
+    for key, value in values.items():
+        text = text.replace("{{" + key + "}}", str(value))
+    leftover = _PLACEHOLDER.search(text)
+    if leftover:
+        raise AssetUnavailable(f"asset-placeholder-unfilled: {name} ({leftover.group(0)})")
+    return text
 
 
 def confidence_value(raw) -> int:
@@ -939,20 +997,10 @@ def cmd_import(args: argparse.Namespace) -> int:
     instead of narrowing to that ticket. Outbound (`export`, `dump`) keeps it.
     """
     if args.store:
-        print("DEPRECATED: `import <input> --store` prepared a capture payload. That direction is "
-              "now `export`; `import` reads the store INTO the session. Nothing was written.\n"
-              "  to review:  understanding_client.py export <input> --dryrun\n"
-              "  to capture: understanding_client.py export <input>",
-              file=sys.stderr)
+        print(render_asset("import-deprecated-store.md"), file=sys.stderr)
         return 1
     if args.heimdallr is not None:
-        print("DEPRECATED: `--heimdallr` autofill was never an inbound step; `import` binds only "
-              "what the caller passes, so a session on a ticketed branch recalls the whole "
-              "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
-              "  to review:  understanding_client.py export <input> --dryrun\n"
-              "  to capture: understanding_client.py export <input>\n"
-              "  to dump:    understanding_client.py dump --currentsession --from <session-summary-file|->",
-              file=sys.stderr)
+        print(render_asset("import-deprecated-heimdallr.md"), file=sys.stderr)
         return 1
     if args.input:
         print("REFUSED: `import` reads the store into the session and takes no input path. To bring a "
@@ -969,14 +1017,10 @@ def cmd_import(args: argparse.Namespace) -> int:
 
     records, outcome = store_query(filters)
     if outcome == "unreachable":
-        print("UNREACHABLE: nothing accepted a connection to the store. This is an operator action "
-              "(is the API running, and is CONTEXT_MEMORY_BASE_URL right?). No records were read, and "
-              "this is NOT an empty result.", file=sys.stderr)
+        print(render_asset("store-unreachable.md"), file=sys.stderr)
         return 3
     if outcome == "timed-out":
-        print("TIMED OUT: the store accepted the connection and did not answer within its budget. "
-              "This is a hang, NOT an empty result — a retry may succeed. Do not conclude the "
-              "knowledge does not exist.", file=sys.stderr)
+        print(render_asset("store-timed-out.md"), file=sys.stderr)
         return 4
     if outcome != "ok":
         print(f"STORE READ FAILED: {outcome}. Nothing was written.", file=sys.stderr)
@@ -984,9 +1028,7 @@ def cmd_import(args: argparse.Namespace) -> int:
     if not records:
         # A real answer, and the only one of the three that is. It is stated as an answer so the
         # empty case is never mistaken for the two failures above.
-        print("NO RECORDS MATCHED: the store answered, and there is nothing under these filters. "
-              "This is an empty result, not a failure — widen the filters (`--all`, drop `--query`) "
-              "if you expected memory.")
+        print(render_asset("store-no-records.md"))
         _mark_import(args, "import", [], "store-export", selector=filters)
         return 0
 
@@ -1144,8 +1186,8 @@ DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
 # `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the
 # report and let the export proceed was a message contradicting what the process then did.
 DECISIONS_REFUSED = "decisions: refused"
-_GATE_REDACTOR_REFUSAL = ("REFUSED: the decision gate's redactor could not run, so record content would "
-                          "have been sent unscrubbed. Nothing was written.")
+# The refusal's wording lives in `assets/gate-redactor-refusal.md`, loaded at each of its two call
+# sites: one message, one home.
 
 # Seed **only** the flag, and only so this client knows whether to shell out at all. The other nine
 # settings — including the API key, which is a secret — are loaded by the gate subprocess from the same
@@ -1242,7 +1284,7 @@ def probe_decisions(count: int) -> str:
               "skip it.", file=sys.stderr)
         return "decisions: skipped (gate script missing)"
     if not (DECISIONS_GATE.parent / "redact.py").is_file():
-        print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
+        print(render_asset("gate-redactor-refusal.md"), file=sys.stderr)
         return DECISIONS_REFUSED
     not_scored = (f"decisions: not scored (dry run; scoring spends the gate's attempt budget) — "
                   f"a write scores {count} candidate(s) and may hold some")
@@ -1366,7 +1408,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "no detail"
         if '"redactor-unavailable"' in detail:
-            print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
+            print(render_asset("gate-redactor-refusal.md"), file=sys.stderr)
             return candidates, DECISIONS_REFUSED
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
             print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
@@ -2087,24 +2129,19 @@ def reconcile_source_scope(candidates: list[dict], binding: dict) -> bool:
         # for it, which is the re-scoping this function exists to refuse (review 5432012955 #1). An
         # explicit --scope is a choice for the whole export, as it is for unscoped session material.
         if len(scoped) != len(candidates):
-            print(f"REFUSED: {len(scoped)} of {len(candidates)} source records carry a scope ({labels}) "
-                  "and the rest carry none, so adopting it would re-scope the unscoped ones. Export "
-                  "them separately, or pass --scope to choose one scope for all. Nothing was written.",
-                  file=sys.stderr)
+            print(render_asset("export-scope-mixed.md", scoped=len(scoped), total=len(candidates),
+                               labels=labels), file=sys.stderr)
             return False
         if len(sources) > 1:
-            print(f"REFUSED: the source records carry more than one scope ({labels}), and one export "
-                  "writes one group with one scope. Export each scope separately with a matching "
-                  "--scope. Nothing was written.", file=sys.stderr)
+            print(render_asset("export-scope-multiple.md", labels=labels), file=sys.stderr)
             return False
         dimension, identifier = next(iter(sources))
         binding["scope"] = f"{dimension}:{identifier}" if identifier else dimension
         print(f"Scope taken from the source records: {binding['scope']} (pass --scope to state it).")
         return True
     if sources != {_scope_key(binding["scope"])}:
-        print(f"REFUSED: the source records are scoped {labels}, but this export binds scope "
-              f"{binding['scope']}; writing would re-scope them. Export each scope separately with a "
-              "matching --scope. Nothing was written.", file=sys.stderr)
+        print(render_asset("export-scope-mismatch.md", labels=labels, scope=binding["scope"]),
+              file=sys.stderr)
         return False
     return True
 
@@ -2789,22 +2826,14 @@ def cmd_export(args: argparse.Namespace) -> int:
         # offline half of the pipeline runs here (both gates, the cap, the candidate list) and the
         # server-side half runs at the head of a write, before anything is persisted. Saying so is
         # better than sending a request that can only fail on a null group.
-        print(f"\nDRY RUN — nothing was written, and nothing was created.\n"
-              f"  would write: memory ({total_candidates})"
-              + (f", group ({group_state})" if group_state == "dry-run" else "")
-              + f"\n  would not create: anything under an existing group, because no group was "
-                f"resolved\nThe server-side `set --dryrun` veto runs at the start of a write, once "
-              f"a group exists. Re-run without `--dryrun` to capture.")
+        print("\n" + render_asset(
+            "export-preview-dry-run.md", total=total_candidates,
+            group=", group (dry-run)" if group_state == "dry-run" else ""))
         if matched:
-            print(f"  {matched} candidate(s) matched an existing same-subject memory; a write would "
-                  f"version those whose match is in the export's group (a match in another group stays "
-                  f"a separate new memory).")
+            print(render_asset("export-preview-matched.md", matched=matched))
         if total_chunks > 1:
-            print("  Note: a multi-batch write is not atomic across batches; a later batch could "
-                  "be refused at its veto after an earlier batch was already written.")
-        print("Decisions and rules captured this way are written as `kind = understanding`, which does "
-              "NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path "
-              "is an understanding of one, not approved canon.")
+            print(render_asset("export-preview-multi-batch.md"))
+        print(render_asset("export-preview-understanding-kind.md"))
         _mark_export_receipt(args, [])
         return 0
 
@@ -2820,13 +2849,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         args, _product_target(binding, _group_initiative(group)))
 
     if total_chunks > 1:
-        print("\nNon-atomic multi-batch write: each batch was written independently, so a failure in a "
-              "later batch leaves earlier batch(es) committed.")
-    print("This is a receipt: the memories are persisted now, so a post-write digest is not an "
-          "opportunity to approve. Pre-write review is `export --dryrun`.")
-    print("Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "
-          "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
-          "approved canon.")
+        print("\n" + render_asset("export-receipt-multi-batch.md"))
+    print(render_asset("export-receipt.md"))
+    print(render_asset("export-receipt-understanding-kind.md"))
     return 1 if link_failed else 0
 
 
@@ -3793,9 +3818,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    return {"load": cmd_load, "import": cmd_import, "export": cmd_export,
-            "dump": cmd_dump}[args.command](args)
+    try:
+        args = parse_args(argv)
+        return {"load": cmd_load, "import": cmd_import, "export": cmd_export,
+                "dump": cmd_dump}[args.command](args)
+    except AssetUnavailable as error:
+        # A broken install, not a caller mistake: name the file and stop, rather than printing a
+        # message that came from nowhere or continuing with one that is half filled.
+        print(f"REFUSED: {error}. Nothing was written.", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
