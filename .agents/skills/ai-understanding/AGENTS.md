@@ -19,7 +19,8 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
   (LADR-014). The changelog records each.
 - **`scripts/decisions_gate.py`, `decisions_rubric.json`, `redact.py` and `session_marker.py` are
   byte-identical copies of `_mimisbrunnr-shared/scripts/`** — never imported, so the skill runs where no
-  `mimisbrunnr-*` is installed; the repository's `tests/parity_decisions_gate.py` holds them equal (no `tests/` ships in an installed copy). `gate_decisions.py` is
+  `mimisbrunnr-*` is installed; the repository's `tests/parity_decisions_gate.py` holds them equal (no `tests/` ships in an installed copy). **`scripts/assets/` is part of that copy**: the gate loads its
+  messages from it, so the parity test compares the asset file set and every byte. `gate_decisions.py` is
   owned here. The gate reads `CONTEXT_MEMORY_DECISIONS_*` from the
   environment only — never a file — and no store token; `CONTEXT_MEMORY_DECISIONS_API_KEY` reaches only
   `decisions_gate.py`, as the bearer header.
@@ -140,6 +141,7 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-24 | **`scripts/assets/` joined the WET copy set.** The shared gate loads two messages from `scripts/assets/`, so this skill's copy carries the folder and `parity_decisions_gate.py` compares the file set and every byte — a gate copied without its prose is not the same gate | this PR |
 | 2026-10-22 | **Decision settings are environment-only (APPHOST LADR-007).** The WET `decisions_gate.py` re-copied from the shared original (file loader removed); `gate_decisions._flag_set_nowhere` checks the environment only. `gate_behavior.py`: the two "file-only settings enable" cases replaced by one asserting a credential file naming a live stub leaves the gate `not-configured` with zero requests. | LADR-007 |
 | 2026-10-16 | **The WET copy of `decisions_gate.py` gained `--snapshot-file`**, applied identically to the shared original so `parity_decisions_gate.py` still holds them byte-equal. One run's verdicts, written whole beside the stable budget ledger: replaced rather than appended, and naming the ledger it complements. 174 -> 177 gate cases. | PR #278 |
 | 2026-10-16 | **An assets sibling is not a category** -- a regression this branch introduced rather than inherited. `categories` counted every subdirectory, and a `<slug>.assets/` folder is a unit's evidence at every level of the layout, not a category holding units. A purely legacy folder carrying one therefore read as a current run folder of categories: its unit was reported as "sits at the run root" and **nothing was indexed at all**. One unit became zero, with two problems naming a move that would not have helped -- strictly worse than the silent drop it replaced, and it hit the shape the layout documents as normal. The earlier dispatch fix passed a fixture with no assets folder, so it could not see the damage it had done: a regression test is only as good as the fixture it is built on. 118 -> 120 cases. | PR #278 review `3.` |

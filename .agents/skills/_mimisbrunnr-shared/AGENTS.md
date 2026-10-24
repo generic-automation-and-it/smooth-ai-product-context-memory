@@ -10,7 +10,12 @@ Read [`scripts/`](./scripts) first — the scripts and JSON data used by more th
   (`.claude-plugin/marketplace.json`) or gain a row in the skill table of `.agents/skills/README.md`.
 - **Fixes land here first and are re-copied outward.** `ai-understanding` keeps byte-identical copies of
   `decisions_gate.py`, `decisions_rubric.json`, `redact.py` and `session_marker.py` (it ships as its own
-  plugin); a fix made in a copy first is drift.
+  plugin); a fix made in a copy first is drift. **The same applies to `scripts/assets/`**: the prose a
+  shared script loads lives there, and a plugin that copies the script copies its assets too — the
+  skill's parity test compares both the file set and the bytes.
+- **Shared prose lives in `scripts/assets/`, beside the script that prints it, and only that script
+  reads it.** A skill never reads this folder, and a script here never reads a skill's `assets/`.
+  Skill-specific prose stays in the skill (skills root `AGENTS.md`).
 - **Client settings come from the environment; no import reads a file into it (APPHOST LADR-007).**
   `context_memory_client.py` and `decisions_gate.py` read the base URL, read token and decision settings
   from the process environment only. The one file read is `machine_write_token()` — the write token from
@@ -23,6 +28,7 @@ Read [`scripts/`](./scripts) first — the scripts and JSON data used by more th
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-24 | **`scripts/assets/` added — the prose this folder's scripts print.** The gate's attempt-ledger warning and snapshot note load by name from beside the script (`SCRIPTS / "assets"`) through the fail-closed single-pass loader, with a non-UTF-8 file refused as `asset-unreadable`. Shared prose lives here because every `mimisbrunnr-*` skill and the agent reach this one file; a per-skill copy would be the same bytes duplicated for no caller. `ai-understanding`'s WET copy carries the folder too, and `parity_decisions_gate.py` compares the file set and every byte | this PR |
 | 2026-10-22 | **Settings are environment-only (APPHOST LADR-007).** `context_memory_client.py` no longer seeds the read token and base URL from `~/.mimisbrunnr/credentials` at import; a write route reads the write token from that file via `machine_write_token()` when it is not in the environment. `decisions_gate.py` dropped its file loader entirely (re-copied to `ai-understanding`), which ends the second source of truth that ran the gate against launcher defaults whenever the profile was not inherited. | LADR-007 |
 | 2026-10-16 | **The gate kept its declared `Python 3.9+, stdlib only` floor**, after a PEP 604 union (`str | None`) in one annotation made the module unimportable on 3.9 while every local run — on 3.13 — stayed green. Caught by the 3.9 matrix job, which is the only thing that runs it. `from __future__ import annotations` defers every annotation to a string, so the modern spelling is available without silently raising the floor. `test_the_module_keeps_the_python_floor_its_docstring_declares` now checks the invariant on **both** gate copies, so the next one is caught locally rather than in CI. **The harness is not hermetic across images**: four kvasir dump cases shell out to `git init`, so a container without git reports four errors that are not defects — verified against the test bodies, not assumed. | PR #285 |
 | 2026-10-16 | **A run snapshot never writes a record identity in plaintext** (`Ralph` RL-008). The budget ledger stores `sha256:<digest>` and never the identity, because the identity *is* the record's subject and a subject can carry personal data — and the identity is built from the **unredacted** record. A snapshot written verbatim therefore put back on disk exactly the text the ledger exists to keep off it, in a file an operator keeps by default. `snapshot_payload()` replaces each identity with its ledger digest, which is also what a snapshot needs: the same key the budget is stored under, so a verdict joins up to a budget entry without a second unhashed copy of every subject. The printed report is untouched, so the caller and the file cannot disagree about what was scored. A snapshot write failure is now caught and reported rather than destroying the verdict report (RL-002). | Ralph loop RL-002, RL-008 |

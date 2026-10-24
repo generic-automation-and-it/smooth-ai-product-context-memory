@@ -64,7 +64,16 @@ DUMP_MARKER = ".mimisbrunnr-kvasir-understanding-dump"
 SESSION_FILE = "_session.md"
 METADATA_FILE = "_dump.json"
 UNIT_SUFFIX = ".understanding.md"
-_SKILL_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+_SKILL_ROOT = Path(__file__).resolve().parents[1]
+_SKILL_SCRIPTS = _SKILL_ROOT / "scripts"
+# This skill's own human-readable strings, never a peer skill's and never a shared folder's: an
+# `assets/` folder travels with the skill into a zip, and `_mimisbrunnr-shared` owns code, not prose a
+# caller loads (HLD-010; the skills root `AGENTS.md`). One message per file, `.md` for prose, and the
+# file body is the printed text verbatim apart from a single trailing newline.
+_SKILL_ASSETS = _SKILL_ROOT / "assets"
+# The loader below is a copy of the gate's, deliberately: the gate declares `stdlib only` and ships
+# alone inside a plugin copy, so sharing one would still leave two copies — and this client already
+# imports the shared folder for the session marker, which is not a reason to couple it to the gate.
 REDACTOR = _SHARED_SCRIPTS / "redact.py"
 ATOMICITY = _SHARED_SCRIPTS / "atomicity.py"
 READ_CLIENT = _SHARED_SCRIPTS / "context_memory_read_client.py"
@@ -121,6 +130,66 @@ DUMP_MAX_BODY_CHARS = 60000
 # rather than inventing a score.
 _CONFIDENCE_NUMERIC = {"verified": 70, "observed": 60, "contested": 40}
 DEFAULT_CONFIDENCE = 70
+
+
+# ------------------------------------------------------------------ skill assets
+
+
+class AssetUnavailable(Exception):
+    """A message this skill loads was absent, unreadable, empty, or did not resolve as a whole.
+
+    Raised rather than falling back to an inline copy: a message that lives in a file has one home,
+    and a silent fallback would let a broken install drift from that file without a trace. `main`
+    turns it into a refusal, so the failure is named and the caller stops.
+    """
+
+
+_PLACEHOLDER = re.compile(r"\{\{([^{}]*)\}\}")
+
+
+def read_asset(name: str) -> str:
+    """Read one message from this skill's `assets/`, or raise `AssetUnavailable`.
+
+    Fail-closed on every path: a missing file, an unreadable one, one holding bytes that are not
+    UTF-8, and an empty one are one class of failure. The error names the file and never its body,
+    so no message content reaches a log.
+    """
+    path = _SKILL_ASSETS / name
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise AssetUnavailable(f"asset-missing: {name}") from None
+    except (OSError, UnicodeDecodeError):
+        # `UnicodeDecodeError` is a `ValueError`, not an `OSError`: without it here, a corrupt asset
+        # escaped both this guard and `main` as a traceback echoing byte offsets.
+        raise AssetUnavailable(f"asset-unreadable: {name}") from None
+    if text.endswith("\n"):
+        text = text[:-1]
+    if not text.strip():
+        raise AssetUnavailable(f"asset-empty: {name}")
+    return text
+
+
+def render_asset(name: str, **values: object) -> str:
+    """Read an asset and fill its `{{name}}` placeholders, or raise `AssetUnavailable`.
+
+    Substitution is single-pass: a value is inserted verbatim and never re-scanned, so a value that
+    itself contains `{{…}}` prints literally — the same bytes the f-strings this loader replaced
+    produced — instead of being mistaken for a placeholder or filling another one. Plain text
+    substitution, deliberately: `string.Template` would read a `$` in the prose as syntax, and the
+    write path's own documentation quotes `$HOME`-shaped text. A placeholder with no value is the
+    same refusal as a missing file — a half-filled message reads as a whole one, which is worse
+    than stopping.
+    """
+    text = read_asset(name)
+
+    def fill(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in values:
+            raise AssetUnavailable(f"asset-placeholder-unfilled: {name} ({match.group(0)})")
+        return str(values[key])
+
+    return _PLACEHOLDER.sub(fill, text)
 
 
 def confidence_value(raw) -> int:
@@ -939,20 +1008,10 @@ def cmd_import(args: argparse.Namespace) -> int:
     instead of narrowing to that ticket. Outbound (`export`, `dump`) keeps it.
     """
     if args.store:
-        print("DEPRECATED: `import <input> --store` prepared a capture payload. That direction is "
-              "now `export`; `import` reads the store INTO the session. Nothing was written.\n"
-              "  to review:  understanding_client.py export <input> --dryrun\n"
-              "  to capture: understanding_client.py export <input>",
-              file=sys.stderr)
+        print(render_asset("import-deprecated-store.md"), file=sys.stderr)
         return 1
     if args.heimdallr is not None:
-        print("DEPRECATED: `--heimdallr` autofill was never an inbound step; `import` binds only "
-              "what the caller passes, so a session on a ticketed branch recalls the whole "
-              "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
-              "  to review:  understanding_client.py export <input> --dryrun\n"
-              "  to capture: understanding_client.py export <input>\n"
-              "  to dump:    understanding_client.py dump --currentsession --from <session-summary-file|->",
-              file=sys.stderr)
+        print(render_asset("import-deprecated-heimdallr.md"), file=sys.stderr)
         return 1
     if args.input:
         print("REFUSED: `import` reads the store into the session and takes no input path. To bring a "
@@ -1144,8 +1203,8 @@ DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
 # `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the
 # report and let the export proceed was a message contradicting what the process then did.
 DECISIONS_REFUSED = "decisions: refused"
-_GATE_REDACTOR_REFUSAL = ("REFUSED: the decision gate's redactor could not run, so record content would "
-                          "have been sent unscrubbed. Nothing was written.")
+# The refusal's wording lives in `assets/gate-redactor-refusal.md`, loaded at each of its two call
+# sites: one message, one home.
 
 
 # The outer bound on one gate subprocess. Without it a hung gate blocks the export indefinitely,
@@ -1208,11 +1267,10 @@ def probe_decisions(count: int) -> str:
     if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
         return "decisions: disabled"
     if not DECISIONS_GATE.is_file():
-        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a write would "
-              "skip it.", file=sys.stderr)
+        print(render_asset("gate-missing-probe.md", gate=DECISIONS_GATE), file=sys.stderr)
         return "decisions: skipped (gate script missing)"
     if not (DECISIONS_GATE.parent / "redact.py").is_file():
-        print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
+        print(render_asset("gate-redactor-refusal.md"), file=sys.stderr)
         return DECISIONS_REFUSED
     not_scored = (f"decisions: not scored (dry run; scoring spends the gate's attempt budget) — "
                   f"a write scores {count} candidate(s) and may hold some")
@@ -1237,8 +1295,7 @@ def probe_decisions(count: int) -> str:
             outcome = report["outcome"]
             break
     if outcome in ("bad-decisions-config", "bad-decisions-url"):
-        print(f"REFUSED: the decision gate is misconfigured ({outcome}). Nothing was written.",
-              file=sys.stderr)
+        print(render_asset("gate-misconfigured-refusal.md", detail=outcome), file=sys.stderr)
         return DECISIONS_REFUSED
     if outcome == "disabled":
         return "decisions: disabled"
@@ -1262,18 +1319,15 @@ def _ledger_disclosures(report: dict) -> list[str]:
     lines = []
     reset = report.get("ledgerReset")
     if reset is True or (isinstance(reset, str) and reset.strip()):
-        lines.append("decisions: attempt ledger was unreadable and restarted empty; every record's "
-                     "attempt budget restarts")
+        lines.append(render_asset("ledger-restarted.md"))
     evicted = report.get("ledgerEvicted")
     if isinstance(evicted, int) and not isinstance(evicted, bool) and evicted > 0:
         noun = "entry" if evicted == 1 else "entries"
-        lines.append(f"decisions: attempt ledger evicted {evicted} {noun} past its cap; those "
-                     "records' attempt budgets restart")
+        lines.append(render_asset("ledger-evicted.md", count=evicted, noun=noun))
     purged = report.get("ledgerIndexPurged")
     if isinstance(purged, int) and not isinstance(purged, bool) and purged > 0:
         noun = "entry" if purged == 1 else "entries"
-        lines.append(f"decisions: attempt ledger dropped {purged} positional index {noun} left by "
-                     "a prior bug; those positions are scorable again")
+        lines.append(render_asset("ledger-index-purged.md", count=purged, noun=noun))
     return lines
 
 
@@ -1299,8 +1353,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
     if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
         return candidates, "decisions: disabled"
     if not DECISIONS_GATE.is_file():
-        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; the gate was "
-              "skipped and the export continued.", file=sys.stderr)
+        print(render_asset("gate-missing-export.md", gate=DECISIONS_GATE), file=sys.stderr)
         return candidates, "decisions: skipped (gate script missing)"
 
     # Precedence: the environment override first, then the path the caller derived, then the stable
@@ -1328,27 +1381,23 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
         # unreachable one — so every candidate is kept and the reason is stated. Without this the export
         # waited on the subprocess forever, contradicting the contract this function's own docstring
         # states. It is never a refusal: nothing about a timeout means content would go uninspected.
-        print(f"NOTE: the decision gate did not answer within {GATE_TIMEOUT_SECONDS}s; the gate was "
-              "skipped and the export continued.", file=sys.stderr)
+        print(render_asset("gate-timeout-note.md", seconds=GATE_TIMEOUT_SECONDS), file=sys.stderr)
         return candidates, f"decisions: skipped (gate timed out after {GATE_TIMEOUT_SECONDS}s)"
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "no detail"
         if '"redactor-unavailable"' in detail:
-            print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
+            print(render_asset("gate-redactor-refusal.md"), file=sys.stderr)
             return candidates, DECISIONS_REFUSED
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
-            print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
-                  file=sys.stderr)
+            print(render_asset("gate-misconfigured-refusal.md", detail=detail), file=sys.stderr)
             return candidates, DECISIONS_REFUSED
-        print(f"NOTE: the decision gate failed ({detail}); the gate was skipped and the export "
-              "continued.", file=sys.stderr)
+        print(render_asset("gate-failed-note.md", detail=detail), file=sys.stderr)
         return candidates, "decisions: skipped (gate failed)"
 
     try:
         report = json.loads(proc.stdout)
     except ValueError:
-        print("NOTE: the decision gate returned unreadable output; the gate was skipped and the "
-              "export continued.", file=sys.stderr)
+        print(render_asset("gate-unreadable-output-note.md"), file=sys.stderr)
         return candidates, "decisions: skipped (unreadable output)"
     if not isinstance(report, dict):
         # Readable JSON of a shape this client cannot interpret — a list, a string, a number — is
@@ -1357,8 +1406,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
         # a traceback. The `records` guard below handles the same case one level down; this is the
         # same rule at the top: keep every candidate and say why, never flatten the unknown into a
         # plausible answer and never stop a capture over it.
-        print("NOTE: the decision gate returned an unrecognised report shape; the gate was skipped "
-              "and the export continued.", file=sys.stderr)
+        print(render_asset("gate-unrecognised-report-note.md"), file=sys.stderr)
         return candidates, "decisions: skipped (unrecognised report)"
 
     for line in _ledger_disclosures(report):
@@ -1381,8 +1429,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
     # (issue 179). A value this client cannot read is not guessed at.
     below = report.get("belowThreshold")
     if below not in ("hold", "mark"):
-        print(f"NOTE: the decision gate reported no usable belowThreshold ({below!r}); the gate was "
-              "skipped and the export continued.", file=sys.stderr)
+        print(render_asset("gate-bad-below-threshold-note.md", below=repr(below)), file=sys.stderr)
         return candidates, "decisions: skipped (unrecognised belowThreshold)"
 
     # **Every candidate survives unless a score says otherwise.** The list is built by walking the
@@ -1394,8 +1441,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
     # already follow here: anything unrecognised is reported, never flattened into a plausible answer.
     records = report.get("records")
     if not isinstance(records, list):
-        print(f"NOTE: the decision gate returned no usable 'records' list "
-              f"({report.get('outcome')!r}); the gate was skipped and the export continued.",
+        print(render_asset("gate-bad-records-note.md", outcome=repr(report.get("outcome"))),
               file=sys.stderr)
         return candidates, "decisions: skipped (unrecognised report)"
 
@@ -1713,6 +1759,18 @@ def _product_register_hint(product: str) -> str:
     return (f"Register it first:\n"
             f"  echo '{{\"name\": \"{product}\", \"status\": \"active\"}}' | "
             f"python3 -B {WRITE_CLIENT} upsert-product-name")
+
+
+def _initiative_create_hint(initiative: str) -> str:
+    """The command that creates a missing initiative, from this skill's assets.
+
+    Three printed lines at two call sites, so it lives in `assets/` like the other prose. Its
+    trailing newline is payload — callers append `Nothing was written.` after it, and the loader
+    strips a file's own newline. The write client's resolved path is substituted, so an installed
+    copy points at the client it actually has.
+    """
+    return render_asset("initiative-create-hint.md", initiative=initiative,
+                        write_client=WRITE_CLIENT) + "\n"
 
 
 def _preview_product_link(args: argparse.Namespace, targets: list[tuple[str, str]]) -> None:
@@ -2268,7 +2326,8 @@ def _persist_proposed_batch(args: argparse.Namespace, candidates: list[dict], gr
         print(f"NOTE: persisting proposed memories failed ({(err.strip() or out.strip())[:200]}); "
               f"{len(persist)} held stayed in the review queue file.", file=sys.stderr)
         return 0, queued_only + len(persist)
-    print(f"\nPROPOSED ({len(persist)} held -> store as Status=proposed):\n{out.strip()[:1200]}")
+    print(render_asset("persist-proposed-frame.md", count=len(persist),
+                       output=out.strip()[:1200]))
     # The marker follows the receipt: proposed rows reached the store, so they are recorded like
     # any other write from this session.
     _mark_export_receipt(args, [{"id": item["uuid"] or item["createUuid"],
@@ -2478,16 +2537,14 @@ def cmd_export(args: argparse.Namespace) -> int:
                       f"initiative '{initiative}' is absent — would create: "
                       f"context_memory_client.py upsert-initiative "
                       f"<<<'name': '{initiative}', 'status': 'active'>>>")
-    create_hint = (f"Create it first, then re-run:\n"
-                   f"  echo '{{\"name\": \"{initiative}\", \"status\": \"active\"}}' | "
-                   f"python3 -B {WRITE_CLIENT} upsert-initiative\n")
     # Only a group that must be created needs the initiative: `resolve-group` returns an existing
     # ticket-bound group without looking it up, so an absent initiative refuses a ticketless write (which
     # always creates) here, and a ticket-bound one only if resolution reports it (consumer review
     # 5438563690 #12).
     if args.write and not exists and not binding["tickets"]:
         print(f"REFUSED: initiative '{initiative}' does not exist, and resolve-group answers 404 for "
-              f"it when it creates a group. {create_hint}Nothing was written.", file=sys.stderr)
+              f"it when it creates a group. {_initiative_create_hint(initiative)}Nothing was written.",
+              file=sys.stderr)
         return 1
 
 
@@ -2520,8 +2577,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         decision_note = probe_decisions(len(clean))
         held_verdicts = []
     if decision_note == DECISIONS_REFUSED:
-        print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
-              "written; fix the gate or export without it.", file=sys.stderr)
+        print(render_asset("gate-refused-export.md"), file=sys.stderr)
         return 1
 
     # The gate's below-threshold holds, under `hold`, are held candidates too and go to the same queue.
@@ -2558,8 +2614,8 @@ def cmd_export(args: argparse.Namespace) -> int:
         print(f"  would propose: up to {len(held)} held as Status=proposed "
               f"(duplicates stay queue-file-only)")
     if held_verdicts:
-        print(f"  {len(held_verdicts)} also held by the decision gate (below threshold) -> "
-              f"{_review_queue_path()}")
+        print(render_asset("gate-held-count.md", count=len(held_verdicts),
+                           queue=_review_queue_path()))
     if total_chunks > 1:
         print(f"Split into {total_chunks} batch(es) of at most {MAX_CANDIDATES} candidates: "
               + ", ".join(str(len(c)) for c in chunks) + ".")
@@ -2587,7 +2643,8 @@ def cmd_export(args: argparse.Namespace) -> int:
     group, group_state = resolve_group(binding, args.name, args.body, dryrun=not args.write)
     if args.write:
         if group is None:
-            hint = (f" Initiative '{initiative}' does not exist; a new group needs it. {create_hint}"
+            hint = (f" Initiative '{initiative}' does not exist; a new group needs it. "
+                    f"{_initiative_create_hint(initiative)}"
                     if not exists else " ")
             print(f"REFUSED: resolve-group failed: {group_state}.{hint}Nothing was written.",
                   file=sys.stderr)
@@ -2718,7 +2775,7 @@ def cmd_export(args: argparse.Namespace) -> int:
             if batch_no > 1:
                 _warn_product_link_skipped(args)
             return 1
-        print(f"\nset --dryrun (the veto point){tag}:\n{out.strip()[:1200]}")
+        print(render_asset("veto-dryrun-frame.md", tag=tag, output=out.strip()[:1200]))
 
         rc, out, err = _run_capture_client(WRITE_CLIENT, ["set"], set_payload)
         if rc != 0:
@@ -2726,7 +2783,7 @@ def cmd_export(args: argparse.Namespace) -> int:
             if batch_no > 1:
                 _warn_product_link_skipped(args)
             return 1
-        print(f"\nWROTE{tag}:\n{out.strip()[:1200]}")
+        print(render_asset("wrote-frame.md", tag=tag, output=out.strip()[:1200]))
         # The marker follows the receipt, never the plan: one export entry per
         # completed batch, so a partial multi-batch export records exactly what
         # reached the store (amended LADR-11). The version rides along when the
@@ -2757,12 +2814,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         # offline half of the pipeline runs here (both gates, the cap, the candidate list) and the
         # server-side half runs at the head of a write, before anything is persisted. Saying so is
         # better than sending a request that can only fail on a null group.
-        print(f"\nDRY RUN — nothing was written, and nothing was created.\n"
-              f"  would write: memory ({total_candidates})"
-              + (f", group ({group_state})" if group_state == "dry-run" else "")
-              + f"\n  would not create: anything under an existing group, because no group was "
-                f"resolved\nThe server-side `set --dryrun` veto runs at the start of a write, once "
-              f"a group exists. Re-run without `--dryrun` to capture.")
+        print("\n" + render_asset(
+            "export-preview-dry-run.md", total=total_candidates,
+            group=", group (dry-run)" if group_state == "dry-run" else ""))
         if matched:
             print(f"  {matched} candidate(s) matched an existing same-subject memory; a write would "
                   f"version those whose match is in the export's group (a match in another group stays "
@@ -2824,7 +2878,7 @@ def _mark_export_receipt(args: argparse.Namespace, written: list[dict],
         _, status = _marker.append_export("kvasir", sid, harness, written,
                                           folder=folder)
     except OSError as error:
-        print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+        print(render_asset("session-marker-note.md", error=error), file=sys.stderr)
         return
     print(_marker.marker_line(status, sid, len(written), verb="export"))
 
@@ -2988,17 +3042,16 @@ def derive_folder_name(content: str, explicit: str | None) -> str:
     return slugify(f"session-{stamp}")
 
 
-SESSION_TEMPLATE = """## Understandings
+def session_template() -> str:
+    """The starting content `dump` writes when `--from` carried nothing, from this skill's assets.
 
-_(One entry per Understanding, each with: question, answer, why, boundaries, provenance. State
-behaviour, contracts and invariants, not file paths or line numbers, which rot. Never a credential
-value and no personal data (names, emails, user IDs); the dump redacts what it recognises, but that is
-the second net, not the first.)_
+    Loaded at the call site, never at import: a module-level read would turn a missing asset into an
+    `ImportError` traceback before `main` could name the file and refuse. The template is written as a
+    file, so its final newline is payload rather than formatting — the loader strips a file's own
+    trailing newline, and it is restored here.
+    """
+    return read_asset("session.template.md") + "\n"
 
-## Decisions
-
-## Open questions
-"""
 
 # The generated header is fenced so it can never be proposed as a fact. Three lines of the dump's own
 # prose — "Generated:", the projection note, the load instruction — were becoming candidates on the
@@ -3117,14 +3170,14 @@ def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None
             _marker.record_import("kvasir", sid, harness, verb, True, items,
                                   selector or None, None)
         except OSError as error:
-            print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+            print(render_asset("session-marker-note.md", error=error), file=sys.stderr)
         print(_marker.marker_line("skipped", sid))
         return
     try:
         _, status = _marker.record_import("kvasir", sid, harness, verb, False,
                                           items, sel, as_of)
     except OSError as error:
-        print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+        print(render_asset("session-marker-note.md", error=error), file=sys.stderr)
         return
     marker = _marker.load_marker("kvasir", sid)
     _, _, _, count = _marker.exclusion_set(marker)
@@ -3542,7 +3595,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
         f"- Export it with: `understanding_client.py export <this folder>`",
         GENERATED_FENCE[1],
         "",
-        content.strip() if content.strip() else SESSION_TEMPLATE,
+        content.strip() if content.strip() else session_template(),
         "",
     ]
     (folder / SESSION_FILE).write_text("\n".join(body), encoding="utf-8")
@@ -3761,9 +3814,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    return {"load": cmd_load, "import": cmd_import, "export": cmd_export,
-            "dump": cmd_dump}[args.command](args)
+    try:
+        args = parse_args(argv)
+        return {"load": cmd_load, "import": cmd_import, "export": cmd_export,
+                "dump": cmd_dump}[args.command](args)
+    except AssetUnavailable as error:
+        # A broken install, not a caller mistake: name the file and stop, rather than printing a
+        # message that came from nowhere or continuing with one that is half filled.
+        print(f"REFUSED: {error}. Nothing was written.", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

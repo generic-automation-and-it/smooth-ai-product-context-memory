@@ -1,0 +1,3 @@
+
+WROTE{{tag}}:
+{{output}}

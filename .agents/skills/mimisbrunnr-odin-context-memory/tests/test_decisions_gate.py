@@ -2634,5 +2634,69 @@ class SnapshotTests(GateTestCase):
             self.score()
             self.assertEqual(before, set(Path(tmp).iterdir()))
 
+class GateAssetTests(unittest.TestCase):
+    """The gate's own prose lives in `scripts/assets/`, beside the script that prints it.
+
+    Pinned here because the WET copy in `ai-understanding` is only as good as the parity harness
+    says: a wording change is a deliberate edit in both, never a silent one.
+    """
+
+    def test_the_ledger_warning_is_byte_identical(self):
+        self.assertEqual(
+            "WARNING: attempt ledger /l.json unreadable; moved aside to /l.json.corrupt-1 and "
+            "starting fresh (earlier attempt budgets no longer apply).",
+            _gate.render_asset("gate-ledger-warning.md", path="/l.json",
+                               aside="/l.json.corrupt-1"))
+
+    def test_the_snapshot_note_is_byte_identical(self):
+        self.assertEqual(
+            "NOTE: the run snapshot at /s.json was not written (denied); the verdicts below are "
+            "unaffected.",
+            _gate.render_asset("gate-snapshot-note.md", snapshot="/s.json", error="denied"))
+
+    def test_a_missing_or_corrupt_asset_is_a_named_refusal(self):
+        """A broken install refuses by name; a non-UTF-8 file is `asset-unreadable`, not a traceback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(_gate, "ASSETS", Path(tmp)):
+                with self.assertRaises(_gate.AssetUnavailable) as missing:
+                    _gate.read_asset("nope.md")
+                self.assertEqual("asset-missing: nope.md", str(missing.exception))
+                (Path(tmp) / "bad.md").write_bytes(b"\xff\xfe")
+                with self.assertRaises(_gate.AssetUnavailable) as unreadable:
+                    _gate.read_asset("bad.md")
+                self.assertEqual("asset-unreadable: bad.md", str(unreadable.exception))
+
+    def test_a_broken_install_refuses_by_name_at_the_process_boundary(self):
+        """Raising is half the contract: `main` must turn it into a named refusal and exit 1.
+
+        Driven through `main`, not the helper, because the helper is the part that already had a
+        test — the translation is what a caller actually sees.
+        """
+        with mock.patch.object(
+                _gate, "cmd_probe",
+                side_effect=_gate.AssetUnavailable("asset-missing: gate-snapshot-note.md")), \
+                mock.patch.object(sys, "argv", ["decisions_gate", "probe"]):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as exit_:
+                _gate.main()
+        self.assertEqual(1, exit_.exception.code)
+        self.assertIn("REFUSED: asset-missing: gate-snapshot-note.md. Nothing was written.",
+                      err.getvalue())
+
+    def test_every_asset_is_loaded_and_every_load_names_an_asset(self):
+        """Both directions: an orphan file is dead weight, a dangling name is a refusal at runtime.
+
+        The parity harness compares the copy's file set with the original's, so an asset added here
+        and never loaded would be copied outward and pass parity while doing nothing.
+        """
+        loaded = set()
+        for script in sorted(_gate.ASSETS.parent.glob("*.py")):
+            loaded.update(re.findall(r'(?:read|render)_asset\(\s*"([^"]+)"',
+                                     script.read_text("utf-8")))
+        on_disk = {p.name for p in _gate.ASSETS.iterdir() if p.is_file()}
+        self.assertEqual(set(), on_disk - loaded, "asset on disk that no script loads")
+        self.assertEqual(set(), loaded - on_disk, "script names an asset that is not on disk")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
