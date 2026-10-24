@@ -4636,7 +4636,7 @@ class SessionExportGuidanceTests(unittest.TestCase):
             dumped = (Path(folder) / "_session.md").read_text(encoding="utf-8")
             for claim in claims:
                 self.assertIn(claim, dumped)
-            self.assertNotIn(self._norm(uc.SESSION_TEMPLATE), self._norm(dumped))
+            self.assertNotIn(self._norm(uc.session_template()), self._norm(dumped))
             binding = json.loads((Path(folder) / uc.METADATA_FILE).read_text(encoding="utf-8"))["binding"]
             self.assertEqual(binding["tickets"], ["github:123"])
             self.assertEqual(binding["repository"], "owner/repo")
@@ -5503,20 +5503,10 @@ class SkillAssetTests(unittest.TestCase):
     """
 
     # Each asset's exact text before the move, taken from the literals it replaced. A wording change
-    # is a deliberate edit in both places; a silent one fails here.
+    # is a deliberate edit in both places; a silent one fails here. Only messages passing the
+    # convention's bar live here: at least three printed lines, or one line used at two or more
+    # call sites. One-line one-offs stay inline beside the logic that decides them.
     MOVED = [
-        ("store-unreachable.md", {}, (
-            "UNREACHABLE: nothing accepted a connection to the store. This is an operator action "
-            "(is the API running, and is CONTEXT_MEMORY_BASE_URL right?). No records were read, and "
-            "this is NOT an empty result.")),
-        ("store-timed-out.md", {}, (
-            "TIMED OUT: the store accepted the connection and did not answer within its budget. "
-            "This is a hang, NOT an empty result — a retry may succeed. Do not conclude the "
-            "knowledge does not exist.")),
-        ("store-no-records.md", {}, (
-            "NO RECORDS MATCHED: the store answered, and there is nothing under these filters. "
-            "This is an empty result, not a failure — widen the filters (`--all`, drop `--query`) "
-            "if you expected memory.")),
         ("import-deprecated-store.md", {}, (
             "DEPRECATED: `import <input> --store` prepared a capture payload. That direction is "
             "now `export`; `import` reads the store INTO the session. Nothing was written.\n"
@@ -5533,45 +5523,23 @@ class SkillAssetTests(unittest.TestCase):
         ("gate-redactor-refusal.md", {}, (
             "REFUSED: the decision gate's redactor could not run, so record content would have been "
             "sent unscrubbed. Nothing was written.")),
-        ("export-scope-mixed.md", {"scoped": 7, "total": 9, "labels": "a:b"}, (
-            "REFUSED: 7 of 9 source records carry a scope (a:b) and the rest carry none, so adopting "
-            "it would re-scope the unscoped ones. Export them separately, or pass --scope to choose "
-            "one scope for all. Nothing was written.")),
-        ("export-scope-multiple.md", {"labels": "a:b, c:d"}, (
-            "REFUSED: the source records carry more than one scope (a:b, c:d), and one export writes "
-            "one group with one scope. Export each scope separately with a matching --scope. "
+        ("gate-misconfigured-refusal.md", {"detail": "bad-decisions-config"}, (
+            "REFUSED: the decision gate is misconfigured (bad-decisions-config). "
             "Nothing was written.")),
-        ("export-scope-mismatch.md", {"labels": "a:b", "scope": "x:y"}, (
-            "REFUSED: the source records are scoped a:b, but this export binds scope x:y; writing "
-            "would re-scope them. Export each scope separately with a matching --scope. "
-            "Nothing was written.")),
+        ("session-marker-note.md", {"error": "E"}, (
+            "NOTE: session marker not written (E).")),
         ("export-preview-dry-run.md", {"total": 4, "group": ", group (dry-run)"}, (
             "DRY RUN — nothing was written, and nothing was created.\n"
             "  would write: memory (4), group (dry-run)\n"
             "  would not create: anything under an existing group, because no group was resolved\n"
             "The server-side `set --dryrun` veto runs at the start of a write, once a group exists. "
             "Re-run without `--dryrun` to capture.")),
-        ("export-preview-matched.md", {"matched": 3}, (
-            "  3 candidate(s) matched an existing same-subject memory; a write would version those "
-            "whose match is in the export's group (a match in another group stays a separate new "
-            "memory).")),
-        ("export-preview-multi-batch.md", {}, (
-            "  Note: a multi-batch write is not atomic across batches; a later batch could be "
-            "refused at its veto after an earlier batch was already written.")),
-        ("export-preview-understanding-kind.md", {}, (
-            "Decisions and rules captured this way are written as `kind = understanding`, which does "
-            "NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path "
-            "is an understanding of one, not approved canon.")),
-        ("export-receipt-multi-batch.md", {}, (
-            "Non-atomic multi-batch write: each batch was written independently, so a failure in a "
-            "later batch leaves earlier batch(es) committed.")),
-        ("export-receipt.md", {}, (
-            "This is a receipt: the memories are persisted now, so a post-write digest is not an "
-            "opportunity to approve. Pre-write review is `export --dryrun`.")),
-        ("export-receipt-understanding-kind.md", {}, (
-            "Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "
-            "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
-            "approved canon.")),
+        ("persist-proposed-frame.md", {"count": 2, "output": "OUT"}, (
+            "\nPROPOSED (2 held -> store as Status=proposed):\nOUT")),
+        ("veto-dryrun-frame.md", {"tag": " T", "output": "OUT"}, (
+            "\nset --dryrun (the veto point) T:\nOUT")),
+        ("wrote-frame.md", {"tag": "", "output": "OUT"}, (
+            "\nWROTE:\nOUT")),
     ]
 
     def test_every_moved_message_is_byte_identical_to_what_it_replaced(self):
@@ -5627,6 +5595,48 @@ class SkillAssetTests(unittest.TestCase):
                 with self.assertRaises(uc.AssetUnavailable) as error:
                     uc.render_asset("half.md")
         self.assertIn("asset-placeholder-unfilled: half.md ({{total}})", str(error.exception))
+
+    def test_the_dump_template_is_loaded_and_keeps_its_written_newline(self):
+        """R4 names templates, and a 10-line one is prose, not code.
+
+        `dump` writes this as a file, so the final newline is payload: the loader strips a file's own
+        trailing newline and `session_template()` restores it. A module-level read would have made a
+        missing asset an `ImportError` before `main` could refuse, hence the function.
+        """
+        expected = (
+            "## Understandings\n"
+            "\n"
+            "_(One entry per Understanding, each with: question, answer, why, boundaries, provenance. "
+            "State\n"
+            "behaviour, contracts and invariants, not file paths or line numbers, which rot. Never a "
+            "credential\n"
+            "value and no personal data (names, emails, user IDs); the dump redacts what it "
+            "recognises, but that is\n"
+            "the second net, not the first.)_\n"
+            "\n"
+            "## Decisions\n"
+            "\n"
+            "## Open questions\n"
+        )
+        self.assertEqual(expected, uc.session_template())
+
+    def test_a_value_containing_a_placeholder_is_inserted_verbatim(self):
+        """Single-pass substitution: a value is never re-scanned, matching the replaced f-strings.
+
+        A record whose scope literally reads `{{scope}}`, re-exported under `--scope x:y`, printed
+        `scoped {{scope}}` before the move. A chained `.replace` could not tell that value apart
+        from a real placeholder: it either refused blaming the install (a value holding an unknown
+        `{{…}}`) or filled both occurrences and printed `scoped x:y` — a false claim about what the
+        records carry, reading as a whole message.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "mix.md").write_text("scoped {{labels}}, binds {{scope}}\n",
+                                              encoding="utf-8")
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                rendered = uc.render_asset("mix.md", labels="{{scope}}", scope="x:y")
+                unknown = uc.render_asset("mix.md", labels="{{unknown}}", scope="x:y")
+        self.assertEqual("scoped {{scope}}, binds x:y", rendered)
+        self.assertEqual("scoped {{unknown}}, binds x:y", unknown)
 
     def test_a_dollar_in_the_prose_is_not_template_syntax(self):
         """`string.Template` would raise on `$HOME`, and the write path's docs quote that shape."""

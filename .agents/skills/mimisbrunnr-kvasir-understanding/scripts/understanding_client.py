@@ -141,7 +141,7 @@ class AssetUnavailable(Exception):
     """
 
 
-_PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}")
+_PLACEHOLDER = re.compile(r"\{\{([^{}]*)\}\}")
 
 
 def read_asset(name: str) -> str:
@@ -167,18 +167,23 @@ def read_asset(name: str) -> str:
 def render_asset(name: str, **values: object) -> str:
     """Read an asset and fill its `{{name}}` placeholders, or raise `AssetUnavailable`.
 
-    Plain `.replace` per name, deliberately: `string.Template` would read a `$` in the prose as
-    syntax, and the write path's own documentation quotes `$HOME`-shaped text. A placeholder left
-    without a value is the same refusal as a missing file — a half-filled message reads as a whole
-    one, which is worse than stopping.
+    Substitution is single-pass: a value is inserted verbatim and never re-scanned, so a value that
+    itself contains `{{…}}` prints literally — the same bytes the f-strings this loader replaced
+    produced — instead of being mistaken for a placeholder or filling another one. Plain text
+    substitution, deliberately: `string.Template` would read a `$` in the prose as syntax, and the
+    write path's own documentation quotes `$HOME`-shaped text. A placeholder with no value is the
+    same refusal as a missing file — a half-filled message reads as a whole one, which is worse
+    than stopping.
     """
     text = read_asset(name)
-    for key, value in values.items():
-        text = text.replace("{{" + key + "}}", str(value))
-    leftover = _PLACEHOLDER.search(text)
-    if leftover:
-        raise AssetUnavailable(f"asset-placeholder-unfilled: {name} ({leftover.group(0)})")
-    return text
+
+    def fill(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in values:
+            raise AssetUnavailable(f"asset-placeholder-unfilled: {name} ({match.group(0)})")
+        return str(values[key])
+
+    return _PLACEHOLDER.sub(fill, text)
 
 
 def confidence_value(raw) -> int:
@@ -1017,10 +1022,14 @@ def cmd_import(args: argparse.Namespace) -> int:
 
     records, outcome = store_query(filters)
     if outcome == "unreachable":
-        print(render_asset("store-unreachable.md"), file=sys.stderr)
+        print("UNREACHABLE: nothing accepted a connection to the store. This is an operator action "
+              "(is the API running, and is CONTEXT_MEMORY_BASE_URL right?). No records were read, and "
+              "this is NOT an empty result.", file=sys.stderr)
         return 3
     if outcome == "timed-out":
-        print(render_asset("store-timed-out.md"), file=sys.stderr)
+        print("TIMED OUT: the store accepted the connection and did not answer within its budget. "
+              "This is a hang, NOT an empty result — a retry may succeed. Do not conclude the "
+              "knowledge does not exist.", file=sys.stderr)
         return 4
     if outcome != "ok":
         print(f"STORE READ FAILED: {outcome}. Nothing was written.", file=sys.stderr)
@@ -1028,7 +1037,9 @@ def cmd_import(args: argparse.Namespace) -> int:
     if not records:
         # A real answer, and the only one of the three that is. It is stated as an answer so the
         # empty case is never mistaken for the two failures above.
-        print(render_asset("store-no-records.md"))
+        print("NO RECORDS MATCHED: the store answered, and there is nothing under these filters. "
+              "This is an empty result, not a failure — widen the filters (`--all`, drop `--query`) "
+              "if you expected memory.")
         _mark_import(args, "import", [], "store-export", selector=filters)
         return 0
 
@@ -1309,8 +1320,7 @@ def probe_decisions(count: int) -> str:
             outcome = report["outcome"]
             break
     if outcome in ("bad-decisions-config", "bad-decisions-url"):
-        print(f"REFUSED: the decision gate is misconfigured ({outcome}). Nothing was written.",
-              file=sys.stderr)
+        print(render_asset("gate-misconfigured-refusal.md", detail=outcome), file=sys.stderr)
         return DECISIONS_REFUSED
     if outcome == "disabled":
         return "decisions: disabled"
@@ -1411,8 +1421,7 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
             print(render_asset("gate-redactor-refusal.md"), file=sys.stderr)
             return candidates, DECISIONS_REFUSED
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
-            print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
-                  file=sys.stderr)
+            print(render_asset("gate-misconfigured-refusal.md", detail=detail), file=sys.stderr)
             return candidates, DECISIONS_REFUSED
         print(f"NOTE: the decision gate failed ({detail}); the gate was skipped and the export "
               "continued.", file=sys.stderr)
@@ -2129,19 +2138,24 @@ def reconcile_source_scope(candidates: list[dict], binding: dict) -> bool:
         # for it, which is the re-scoping this function exists to refuse (review 5432012955 #1). An
         # explicit --scope is a choice for the whole export, as it is for unscoped session material.
         if len(scoped) != len(candidates):
-            print(render_asset("export-scope-mixed.md", scoped=len(scoped), total=len(candidates),
-                               labels=labels), file=sys.stderr)
+            print(f"REFUSED: {len(scoped)} of {len(candidates)} source records carry a scope ({labels}) "
+                  "and the rest carry none, so adopting it would re-scope the unscoped ones. Export "
+                  "them separately, or pass --scope to choose one scope for all. Nothing was written.",
+                  file=sys.stderr)
             return False
         if len(sources) > 1:
-            print(render_asset("export-scope-multiple.md", labels=labels), file=sys.stderr)
+            print(f"REFUSED: the source records carry more than one scope ({labels}), and one export "
+                  "writes one group with one scope. Export each scope separately with a matching "
+                  "--scope. Nothing was written.", file=sys.stderr)
             return False
         dimension, identifier = next(iter(sources))
         binding["scope"] = f"{dimension}:{identifier}" if identifier else dimension
         print(f"Scope taken from the source records: {binding['scope']} (pass --scope to state it).")
         return True
     if sources != {_scope_key(binding["scope"])}:
-        print(render_asset("export-scope-mismatch.md", labels=labels, scope=binding["scope"]),
-              file=sys.stderr)
+        print(f"REFUSED: the source records are scoped {labels}, but this export binds scope "
+              f"{binding['scope']}; writing would re-scope them. Export each scope separately with a "
+              "matching --scope. Nothing was written.", file=sys.stderr)
         return False
     return True
 
@@ -2337,7 +2351,8 @@ def _persist_proposed_batch(args: argparse.Namespace, candidates: list[dict], gr
         print(f"NOTE: persisting proposed memories failed ({(err.strip() or out.strip())[:200]}); "
               f"{len(persist)} held stayed in the review queue file.", file=sys.stderr)
         return 0, queued_only + len(persist)
-    print(f"\nPROPOSED ({len(persist)} held -> store as Status=proposed):\n{out.strip()[:1200]}")
+    print(render_asset("persist-proposed-frame.md", count=len(persist),
+                       output=out.strip()[:1200]))
     # The marker follows the receipt: proposed rows reached the store, so they are recorded like
     # any other write from this session.
     _mark_export_receipt(args, [{"id": item["uuid"] or item["createUuid"],
@@ -2787,7 +2802,7 @@ def cmd_export(args: argparse.Namespace) -> int:
             if batch_no > 1:
                 _warn_product_link_skipped(args)
             return 1
-        print(f"\nset --dryrun (the veto point){tag}:\n{out.strip()[:1200]}")
+        print(render_asset("veto-dryrun-frame.md", tag=tag, output=out.strip()[:1200]))
 
         rc, out, err = _run_capture_client(WRITE_CLIENT, ["set"], set_payload)
         if rc != 0:
@@ -2795,7 +2810,7 @@ def cmd_export(args: argparse.Namespace) -> int:
             if batch_no > 1:
                 _warn_product_link_skipped(args)
             return 1
-        print(f"\nWROTE{tag}:\n{out.strip()[:1200]}")
+        print(render_asset("wrote-frame.md", tag=tag, output=out.strip()[:1200]))
         # The marker follows the receipt, never the plan: one export entry per
         # completed batch, so a partial multi-batch export records exactly what
         # reached the store (amended LADR-11). The version rides along when the
@@ -2830,10 +2845,15 @@ def cmd_export(args: argparse.Namespace) -> int:
             "export-preview-dry-run.md", total=total_candidates,
             group=", group (dry-run)" if group_state == "dry-run" else ""))
         if matched:
-            print(render_asset("export-preview-matched.md", matched=matched))
+            print(f"  {matched} candidate(s) matched an existing same-subject memory; a write would "
+                  f"version those whose match is in the export's group (a match in another group stays "
+                  f"a separate new memory).")
         if total_chunks > 1:
-            print(render_asset("export-preview-multi-batch.md"))
-        print(render_asset("export-preview-understanding-kind.md"))
+            print("  Note: a multi-batch write is not atomic across batches; a later batch could "
+                  "be refused at its veto after an earlier batch was already written.")
+        print("Decisions and rules captured this way are written as `kind = understanding`, which does "
+              "NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path "
+              "is an understanding of one, not approved canon.")
         _mark_export_receipt(args, [])
         return 0
 
@@ -2849,9 +2869,13 @@ def cmd_export(args: argparse.Namespace) -> int:
         args, _product_target(binding, _group_initiative(group)))
 
     if total_chunks > 1:
-        print("\n" + render_asset("export-receipt-multi-batch.md"))
-    print(render_asset("export-receipt.md"))
-    print(render_asset("export-receipt-understanding-kind.md"))
+        print("\nNon-atomic multi-batch write: each batch was written independently, so a failure in a "
+              "later batch leaves earlier batch(es) committed.")
+    print("This is a receipt: the memories are persisted now, so a post-write digest is not an "
+          "opportunity to approve. Pre-write review is `export --dryrun`.")
+    print("Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "
+          "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
+          "approved canon.")
     return 1 if link_failed else 0
 
 
@@ -2881,7 +2905,7 @@ def _mark_export_receipt(args: argparse.Namespace, written: list[dict],
         _, status = _marker.append_export("kvasir", sid, harness, written,
                                           folder=folder)
     except OSError as error:
-        print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+        print(render_asset("session-marker-note.md", error=error), file=sys.stderr)
         return
     print(_marker.marker_line(status, sid, len(written), verb="export"))
 
@@ -3045,17 +3069,16 @@ def derive_folder_name(content: str, explicit: str | None) -> str:
     return slugify(f"session-{stamp}")
 
 
-SESSION_TEMPLATE = """## Understandings
+def session_template() -> str:
+    """The starting content `dump` writes when `--from` carried nothing, from this skill's assets.
 
-_(One entry per Understanding, each with: question, answer, why, boundaries, provenance. State
-behaviour, contracts and invariants, not file paths or line numbers, which rot. Never a credential
-value and no personal data (names, emails, user IDs); the dump redacts what it recognises, but that is
-the second net, not the first.)_
+    Loaded at the call site, never at import: a module-level read would turn a missing asset into an
+    `ImportError` traceback before `main` could name the file and refuse. The template is written as a
+    file, so its final newline is payload rather than formatting — the loader strips a file's own
+    trailing newline, and it is restored here.
+    """
+    return read_asset("session.template.md") + "\n"
 
-## Decisions
-
-## Open questions
-"""
 
 # The generated header is fenced so it can never be proposed as a fact. Three lines of the dump's own
 # prose — "Generated:", the projection note, the load instruction — were becoming candidates on the
@@ -3174,14 +3197,14 @@ def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None
             _marker.record_import("kvasir", sid, harness, verb, True, items,
                                   selector or None, None)
         except OSError as error:
-            print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+            print(render_asset("session-marker-note.md", error=error), file=sys.stderr)
         print(_marker.marker_line("skipped", sid))
         return
     try:
         _, status = _marker.record_import("kvasir", sid, harness, verb, False,
                                           items, sel, as_of)
     except OSError as error:
-        print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+        print(render_asset("session-marker-note.md", error=error), file=sys.stderr)
         return
     marker = _marker.load_marker("kvasir", sid)
     _, _, _, count = _marker.exclusion_set(marker)
@@ -3599,7 +3622,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
         f"- Export it with: `understanding_client.py export <this folder>`",
         GENERATED_FENCE[1],
         "",
-        content.strip() if content.strip() else SESSION_TEMPLATE,
+        content.strip() if content.strip() else session_template(),
         "",
     ]
     (folder / SESSION_FILE).write_text("\n".join(body), encoding="utf-8")
