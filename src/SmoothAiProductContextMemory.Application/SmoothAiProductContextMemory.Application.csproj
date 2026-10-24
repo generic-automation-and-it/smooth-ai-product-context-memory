@@ -26,4 +26,7 @@
     <InternalsVisibleTo Include="SmoothAiProductContextMemory.Application.ComponentTest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NodaTime.Serialization.SystemTextJson" />
+  </ItemGroup>
 </Project>

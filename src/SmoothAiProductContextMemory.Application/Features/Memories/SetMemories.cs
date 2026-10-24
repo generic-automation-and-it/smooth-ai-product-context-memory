@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Text;
 using FluentValidation;
 using Mediator;
@@ -37,8 +38,8 @@ public static class SetMemories
         short Confidence,
         string? Content,
         IReadOnlyList<SourceInput>? Sources,
-        DateTimeOffset ValidFrom,
-        DateTimeOffset? ValidUntil,
+        Instant ValidFrom,
+        Instant? ValidUntil,
         string? SummaryModel,
         string? SummaryPromptVersion,
         Guid? CreateUuid = null,
@@ -51,25 +52,34 @@ public static class SetMemories
         IReadOnlyList<MemoryWrite> Items,
         IReadOnlyList<LinkWrite>? Links,
         IReadOnlyList<string>? LabelsProposed,
+        IReadOnlyList<TicketReferenceInput>? TicketReferences = null,
         bool DryRun = false,
+        string? ProductName = null,
         string? OperationKey = null,
         Guid? ExpectedCorpusEpoch = null,
         long? ExpectedCorpusRevision = null) : IRequest<Response>;
+
 
     /// <summary>
     /// <see cref="Uuid"/> is stable on dry-run when the caller supplied <c>createUuid</c>; legacy
     /// creates keep a null dry-run identity and mint it only during persistence.
     /// </summary>
-    public sealed record ItemResult(Guid? Uuid, string? BlobAddress, bool Versioned);
+    /// <summary>One item's per-item result. <see cref="Versioned"/> and <see cref="Unchanged"/>
+    /// are never both true — an item is either a new version, an unchanged no-op, or a create.</summary>
+    public sealed record ItemResult(Guid? Uuid, string? BlobAddress, bool Versioned, bool Unchanged = false);
 
     public sealed record Response(
         int Created,
         int Versioned,
+        int Unchanged,
         int Linked,
         int Diverged,
         int Skipped,
         int LabelsProposed,
-        IReadOnlyList<ItemResult> Items);
+        int TicketReferencesCreated,
+        int TicketReferencesAlreadyPresent,
+        IReadOnlyList<ItemResult> Items,
+        int ProductLinks = 0);
 
     public sealed class Validator : AbstractValidator<Request>
     {
@@ -139,6 +149,27 @@ public static class SetMemories
             RuleForEach(x => x.LabelsProposed)
                 .NotEmpty()
                 .MaximumLength(100);
+            RuleFor(x => x.TicketReferences)
+                .Must(r => r is null || r.Count <= 20)
+                .WithMessage("At most 20 ticket references may be supplied per request.");
+            RuleForEach(x => x.TicketReferences).ChildRules(ticketRef =>
+            {
+                ticketRef.RuleFor(r => r.Provider).NotEmpty().MaximumLength(512);
+                ticketRef.RuleFor(r => r.Key).NotEmpty().MaximumLength(512);
+                ticketRef.RuleFor(r => r.Provider)
+                    .Must(p => p is null || !p.Contains('\0'))
+                    .WithMessage("Provider must not contain a null character.");
+                ticketRef.RuleFor(r => r.Key)
+                    .Must(k => k is null || !k.Contains('\0'))
+                    .WithMessage("Key must not contain a null character.");
+                ticketRef.RuleFor(r => r.Reason).MaximumLength(4000);
+            });
+            RuleFor(x => x.ProductName)
+                .NotEmpty()
+                .MaximumLength(200)
+                .Must(p => p.Trim() == p && !p.Any(char.IsControl))
+                .When(x => !string.IsNullOrWhiteSpace(x.ProductName))
+                .WithMessage("ProductName must not have leading/trailing whitespace or control characters.");
         }
     }
 
@@ -146,6 +177,7 @@ public static class SetMemories
     {
         Create,
         Version,
+        Unchanged,
     }
 
     private sealed record PlannedItem(
@@ -155,7 +187,8 @@ public static class SetMemories
         Guid? Uuid,
         long? MemoryId,
         MemoryVersion? CurrentVersion,
-        int? NextVersion);
+        int? NextVersion,
+        string? MatchedBlobAddress = null);
 
     private sealed record PlannedLink(LinkWrite Write, bool Skip);
 
@@ -163,13 +196,20 @@ public static class SetMemories
         MemoryGroup Group,
         IReadOnlyList<PlannedItem> Items,
         IReadOnlyList<PlannedLink> Links,
-        IReadOnlyList<string> LabelsToInsert);
+        IReadOnlyList<string> LabelsToInsert,
+        IReadOnlyList<TicketReferenceInput> TicketReferences,
+        string? ProductName,
+        string? ProductInitiativeName,
+        bool WouldLinkProduct);
+
+    private const string DefaultAboutReason = "captured under referenced ticket";
 
     public sealed class Handler(
         IApplicationDbContext db,
         IMemoryGraph graph,
         IBlobStorage blobStorage,
         IDbErrorMapper errorMapper,
+        IProductGraph productGraph,
         ILogger<Handler> logger,
         ICorpusCommitStore commitStore) : IRequestHandler<Request, Response>
     {
@@ -210,9 +250,10 @@ public static class SetMemories
                 : await PersistAsync(request, plan, cancellationToken);
 
             logger.LogInformation(
-                "Set memories completed. Created: {Created} Versioned: {Versioned} Linked: {Linked} Diverged: {Diverged} Skipped: {Skipped} DryRun: {DryRun}",
+                "Set memories completed. Created: {Created} Versioned: {Versioned} Unchanged: {Unchanged} Linked: {Linked} Diverged: {Diverged} Skipped: {Skipped} DryRun: {DryRun}",
                 response.Created,
                 response.Versioned,
+                response.Unchanged,
                 response.Linked,
                 response.Diverged,
                 response.Skipped,
@@ -240,7 +281,7 @@ public static class SetMemories
         {
             var items = new List<PlannedItem>(request.Items.Count);
             var plannedSlugs = new HashSet<string>(StringComparer.Ordinal);
-            var plannedVersionTargets = new Dictionary<Guid, (Memory Memory, MemoryVersion Current, int NextVersion)>();
+            var plannedVersionTargets = new Dictionary<Guid, (Memory Memory, MemoryVersion Current, int NextVersion, MemoryClaim LastClaim)>();
             var plannedCreateUuids = new HashSet<Guid>();
 
             // The plan resolves every write against stored state in one pass. The per-item checks below
@@ -312,13 +353,30 @@ public static class SetMemories
                             throw new ConflictException($"Memory '{target}' has no current version.");
                         }
 
-                        versionTarget = (memory, current, current.Version + 1);
+                        versionTarget = (memory, current, current.Version + 1, MemoryClaim.FromVersion(current));
                     }
 
                     if (item.ExpectedVersion is { } expectedVersion && expectedVersion != versionTarget.Current.Version)
                     {
                         throw new ConflictException($"Memory '{target}' changed since comparison.");
                     }
+
+                    MemoryClaim incoming = MemoryClaim.FromWrite(item);
+                    if (MemoryClaim.Same(incoming, versionTarget.LastClaim))
+                    {
+                        logger.LogDebug("Planned version unchanged. Index: {Index}", index);
+                        items.Add(new PlannedItem(
+                            ItemMode.Unchanged,
+                            item,
+                            slug,
+                            target,
+                            versionTarget.Memory.Id,
+                            versionTarget.Current,
+                            versionTarget.NextVersion,
+                            versionTarget.LastClaim.BlobAddress));
+                        continue;
+                    }
+
 
                     logger.LogDebug("Planned version bump. Index: {Index} NextVersion: {Version}", index, versionTarget.NextVersion);
                     items.Add(new PlannedItem(
@@ -332,7 +390,8 @@ public static class SetMemories
                     plannedVersionTargets[target] = (
                         versionTarget.Memory,
                         versionTarget.Current,
-                        versionTarget.NextVersion + 1);
+                        versionTarget.NextVersion + 1,
+                        incoming);
                     continue;
                 }
 
@@ -369,8 +428,34 @@ public static class SetMemories
 
             IReadOnlyList<PlannedLink> links = await PlanLinksAsync(request.Links, items, cancellationToken);
             IReadOnlyList<string> labels = await PlanLabelsAsync(request.LabelsProposed, cancellationToken);
+            IReadOnlyList<TicketReferenceInput> references =
+                await PlanReferencesAsync(request.TicketReferences, group, cancellationToken);
 
-            return new WritePlan(group, items, links, labels);
+            // Product → initiative is declared at capture and rides the memory write transaction. An
+            // unregistered product is refused before anything is written (dry run included); a group
+            // with no initiative simply carries no link (D3 reminder, not a refusal).
+            string? productName = null;
+            string? productInitiativeName = null;
+            bool wouldLinkProduct = false;
+            if (!string.IsNullOrWhiteSpace(request.ProductName))
+            {
+                if (!await productGraph.ExistsAsync(request.ProductName, cancellationToken))
+                {
+                    throw new NotFoundException(
+                        $"Product '{request.ProductName}' is not registered. Register it with 'upsert-product-name' first.");
+                }
+
+                productName = request.ProductName;
+                Initiative? initiative = await db.Initiatives
+                    .SingleOrDefaultAsync(i => i.Id == group.InitiativeId, cancellationToken);
+                productInitiativeName = initiative?.Name;
+                wouldLinkProduct = productInitiativeName is not null
+                    && !(await productGraph.GetInitiativeNamesAsync(productName, cancellationToken))
+                        .Contains(productInitiativeName);
+            }
+
+            return new WritePlan(
+                group, items, links, labels, references, productName, productInitiativeName, wouldLinkProduct);
         }
 
         private async Task<IReadOnlyList<PlannedLink>> PlanLinksAsync(
@@ -468,25 +553,77 @@ public static class SetMemories
             return toInsert;
         }
 
+        /// <summary>
+        /// Resolves each ticket reference to its one owning group. An unknown or unowned ticket, or a
+        /// ticket the writing group already owns, is refused here — the same verdict for dry run and
+        /// write, so neither path can diverge. Returns the deduplicated, valid reference set.
+        /// </summary>
+        private async Task<IReadOnlyList<TicketReferenceInput>> PlanReferencesAsync(
+            IReadOnlyList<TicketReferenceInput>? references,
+            MemoryGroup group,
+            CancellationToken cancellationToken)
+        {
+            if (references is not { Count: > 0 })
+            {
+                return [];
+            }
+
+            // The ABOUT edge is per (memory, ticket); a repeated identity in the request is one edge.
+            var distinct = new Dictionary<(string Provider, string Key), TicketReferenceInput>();
+            foreach (TicketReferenceInput reference in references)
+            {
+                distinct.TryAdd((reference.Provider, reference.Key), reference);
+            }
+
+            var validated = new List<TicketReferenceInput>(distinct.Count);
+            foreach (TicketReferenceInput reference in distinct.Values)
+            {
+                MemoryGroup? owner = await TicketLookup.FindGroupByTicketAsync(
+                    db, reference.Provider, reference.Key, cancellationToken);
+                if (owner is null)
+                {
+                    throw new NotFoundException($"Ticket '{reference.Provider}:{reference.Key}' was not found.");
+                }
+
+                if (owner.Id == group.Id)
+                {
+                    throw new ConflictException(
+                        $"Ticket '{reference.Provider}:{reference.Key}' is owned by the writing group; referencing an owned ticket is not required.");
+                }
+
+                validated.Add(reference);
+            }
+
+            return validated;
+        }
+
         /// <summary>The dry-run verdict — plan counts and resolved identities, with no blob.</summary>
-        private static Response Predict(WritePlan plan) =>
-            new(
-                Counts(plan).Created,
-                Counts(plan).Versioned,
+        private static Response Predict(WritePlan plan)
+        {
+            (int created, int versioned, int unchanged, int diverged, int labels) = Counts(plan);
+            return new(
+                created,
+                versioned,
+                unchanged,
                 plan.Links.Count(l => !l.Skip),
-                Counts(plan).Diverged,
+                diverged,
                 plan.Links.Count(l => l.Skip),
-                Counts(plan).LabelsProposed,
-                [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version))]);
+                labels,
+                plan.TicketReferences.Count * plan.Items.Count,
+                0,
+                [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version, i.Mode == ItemMode.Unchanged))],
+                plan.WouldLinkProduct ? 1 : 0);
+        }
 
         /// <summary>
         /// The count fields shared by the dry-run and the persisted response. Kept in one place so a
         /// new item mode or kind cannot silently diverge between the predict and persist paths.
         /// </summary>
-        private static (int Created, int Versioned, int Diverged, int LabelsProposed) Counts(WritePlan plan) =>
+        private static (int Created, int Versioned, int Unchanged, int Diverged, int LabelsProposed) Counts(WritePlan plan) =>
             (
                 plan.Items.Count(i => i.Mode == ItemMode.Create),
                 plan.Items.Count(i => i.Mode == ItemMode.Version),
+                plan.Items.Count(i => i.Mode == ItemMode.Unchanged),
                 plan.Items.Count(i => i.Mode == ItemMode.Create && i.Write.Kind == MemoryVersion.KindValue.Divergence),
                 plan.LabelsToInsert.Count);
 
@@ -501,6 +638,17 @@ public static class SetMemories
             var addresses = new Dictionary<int, string>();
             for (int index = 0; index < plan.Items.Count; index++)
             {
+                if (plan.Items[index].Mode == ItemMode.Unchanged)
+                {
+                    // The locked replan can turn this into a version after a concurrent write.
+                    // Reuse the immutable body already matched by the initial plan in that case.
+                    if (plan.Items[index].MatchedBlobAddress is { } existingAddress)
+                    {
+                        addresses[index] = existingAddress;
+                    }
+                    continue;
+                }
+
                 string? address = await StoreBlobAsync(plan.Items[index].Write.Content, cancellationToken);
                 if (address is not null)
                 {
@@ -533,9 +681,13 @@ public static class SetMemories
                     PlannedItem item = plan.Items[index];
                     string? address = addresses.GetValueOrDefault(index);
 
-                    results.Add(item.Mode == ItemMode.Create
-                        ? CreateNew(plan.Group, item, address)
-                        : await VersionExistingAsync(item, address, currentVersions, cancellationToken));
+                    results.Add(item.Mode switch
+                    {
+                        ItemMode.Create => CreateNew(plan.Group, item, address),
+                        ItemMode.Version => await VersionExistingAsync(item, address, currentVersions, cancellationToken),
+                        ItemMode.Unchanged => new ItemResult(item.Uuid, item.MatchedBlobAddress, false, true),
+                        _ => throw new ArgumentOutOfRangeException(nameof(item.Mode), item.Mode, null),
+                    });
                 }
 
                 foreach (string name in plan.LabelsToInsert)
@@ -549,25 +701,58 @@ public static class SetMemories
                 int skipped = plan.Links.Count(l => l.Skip);
                 foreach (PlannedLink link in plan.Links.Where(l => !l.Skip))
                 {
-                    bool created = await graph.CreateAsync(
+                    bool linkCreated = await graph.CreateAsync(
                         link.Write.SourceUuid,
                         link.Write.TargetUuid,
                         link.Write.Relation,
                         link.Write.Reason,
                         cancellationToken);
-                    linked += created ? 1 : 0;
-                    skipped += created ? 0 : 1;
+                    linked += linkCreated ? 1 : 0;
+                    skipped += linkCreated ? 0 : 1;
                 }
 
-                (int Created, int Versioned, int Diverged, int LabelsProposed) counts = Counts(plan);
-                var response = new Response(
-                    counts.Created,
-                    counts.Versioned,
-                    linked,
-                    counts.Diverged,
-                    skipped,
-                    counts.LabelsProposed,
-                    results);
+                // Reference edges are request-level and apply to every (now-persisted) memory in the
+                // batch. They run in the same transaction as the memories, and after the memory vertices
+                // exist — the graph MERGEs each memory on demand, and the ticket vertex already exists.
+                int referencesCreated = 0;
+                int referencesAlreadyPresent = 0;
+                foreach (ItemResult result in results)
+                {
+                    foreach (TicketReferenceInput reference in plan.TicketReferences)
+                    {
+                        bool edgeCreated = await graph.CreateAboutAsync(
+                            result.Uuid!.Value,
+                            reference.Provider,
+                            reference.Key,
+                            reference.Reason ?? DefaultAboutReason,
+                            cancellationToken);
+                        if (edgeCreated)
+                        {
+                            referencesCreated++;
+                        }
+                        else
+                        {
+                            referencesAlreadyPresent++;
+                        }
+                    }
+                }
+
+                // Product → initiative rides the same transaction: the edge is declared at capture, and
+                // the group's initiative was resolved in the plan. A group with no initiative links nothing.
+                int productLinks = 0;
+                if (plan.ProductName is not null && plan.ProductInitiativeName is not null)
+                {
+                    bool linkCreated = await productGraph.LinkInitiativeAsync(
+                        plan.ProductName,
+                        plan.ProductInitiativeName,
+                        "bound at capture",
+                        "set",
+                        cancellationToken);
+                    productLinks = linkCreated ? 1 : 0;
+                }
+
+                (int created, int versioned, int unchanged, int diverged, int labels) = Counts(plan);
+                var response = new Response(created, versioned, unchanged, linked, diverged, skipped, labels, referencesCreated, referencesAlreadyPresent, results, productLinks);
                 if (request.OperationKey is { } key)
                 {
                     await commitStore.RecordAsync(CorpusCommit.Receipt(key, PayloadHash(request), "memories", response), cancellationToken);
@@ -663,7 +848,7 @@ public static class SetMemories
                 .ToList() ?? [],
                 ValidFrom = item.ValidFrom,
                 ValidUntil = item.ValidUntil,
-                CreatedOn = DateTimeOffset.UtcNow,
+                CreatedOn = SystemClock.Instance.GetCurrentInstant(),
                 SummaryStamp = string.IsNullOrWhiteSpace(item.SummaryModel)
                 ? null
                 : SummaryStampDocument.Create(item.SummaryModel, item.SummaryPromptVersion ?? string.Empty),

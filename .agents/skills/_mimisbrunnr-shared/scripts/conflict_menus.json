@@ -1,0 +1,26 @@
+{
+  "version": "1",
+  "types": {
+    "duplicate": {
+      "choices": ["version", "link", "skip"],
+      "captures": ["version", "link"]
+    },
+    "contradiction": {
+      "choices": ["keep-both", "supersede", "skip"],
+      "captures": ["keep-both", "supersede"]
+    },
+    "cross-kind-subject": {
+      "choices": ["reclassify", "rename", "drop"],
+      "captures": ["reclassify", "rename"]
+    },
+    "held-atomic": {
+      "choices": ["split", "drop", "park"],
+      "captures": ["split"]
+    },
+    "below-value": {
+      "choices": ["rewrite", "capture-as-proposed", "drop", "park"],
+      "captures": ["rewrite", "capture-as-proposed"]
+    }
+  },
+  "park": ["park"]
+}

@@ -65,6 +65,11 @@ def compose(payload):
     if candidate.get("scopeDimension") != existing.get("scopeDimension") \
             or candidate.get("scopeIdentifier") != existing.get("scopeIdentifier"):
         raise ValueError("claims from different applicability scopes are not a genuine conflict")
+    # The scope check above reads the wrapper, but `write` is what lands in the store. A write that
+    # states a different scope would make the conflict a cross-scope one the check never saw.
+    for field in ("scopeDimension", "scopeIdentifier"):
+        if field in candidate_write and candidate_write[field] != candidate.get(field):
+            raise ValueError(f"candidate.write.{field} disagrees with the candidate's {field}")
 
     candidate_uuid = candidate_write.get("createUuid")
     existing_uuid = existing.get("uuid")

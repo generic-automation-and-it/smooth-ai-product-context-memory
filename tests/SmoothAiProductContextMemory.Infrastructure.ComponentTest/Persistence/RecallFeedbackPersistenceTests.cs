@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -24,7 +25,7 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     [Fact]
     public async Task Attributed_passes_preserve_legacy_counts_and_group_caller_outcomes()
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Instant now = SystemClock.Instance.GetCurrentInstant();
         Guid caller = Guid.NewGuid();
         Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, now, RecallPurpose.ServiceRetrieval, caller)]);
         Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), Guid.NewGuid(), RetrievalShape.FreeText, now, RecallPurpose.ServiceRetrieval, caller)]);
@@ -32,24 +33,24 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
         Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, now, RecallPurpose.CaptureComparison, caller)]);
         Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), Guid.NewGuid(), RetrievalShape.FreeText, now)]);
 
-        MissRateResult all = await Reader.MissRateAsync(new MissRateRequest(now.AddMinutes(-1), now.AddMinutes(1), RecallPurpose.AllPurposes), Ct);
+        MissRateResult all = await Reader.MissRateAsync(new MissRateRequest(now.Plus(Duration.FromMinutes(-1)), now.Plus(Duration.FromMinutes(1)), RecallPurpose.AllPurposes), Ct);
         all.Retrievals.ShouldBe(5);
         all.Misses.ShouldBe(3);
         all.MissRate.ShouldBe(0.6);
         all.CallerRequests.ShouldBe(4); // attribution separates a caller's retrieval and capture purposes
         all.CallerMisses.ShouldBe(2);
 
-        MissRateResult service = await Reader.MissRateAsync(new MissRateRequest(now.AddMinutes(-1), now.AddMinutes(1), RecallPurpose.ServiceRetrieval), Ct);
+        MissRateResult service = await Reader.MissRateAsync(new MissRateRequest(now.Plus(Duration.FromMinutes(-1)), now.Plus(Duration.FromMinutes(1)), RecallPurpose.ServiceRetrieval), Ct);
         service.Retrievals.ShouldBe(3);
         service.Misses.ShouldBe(2);
         service.CallerRequests.ShouldBe(2);
         service.CallerMisses.ShouldBe(1);
         service.CallerMissRate.ShouldBe(0.5);
-        MissRateResult direct = await Reader.MissRateAsync(new MissRateRequest(now.AddMinutes(-1), now.AddMinutes(1), RecallPurpose.DirectRetrieval), Ct);
+        MissRateResult direct = await Reader.MissRateAsync(new MissRateRequest(now.Plus(Duration.FromMinutes(-1)), now.Plus(Duration.FromMinutes(1)), RecallPurpose.DirectRetrieval), Ct);
         direct.Retrievals.ShouldBe(1);
         direct.CallerRequests.ShouldBe(1);
         direct.CallerMisses.ShouldBe(0);
-        var defaultResult = await Reader.MissRateAsync(new MissRateRequest(now.AddMinutes(-1), now.AddMinutes(1)), Ct);
+        var defaultResult = await Reader.MissRateAsync(new MissRateRequest(now.Plus(Duration.FromMinutes(-1)), now.Plus(Duration.FromMinutes(1))), Ct);
         defaultResult.ShouldBe(direct);
     }
 
@@ -57,14 +58,14 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     public async Task Capture_comparison_does_not_hide_never_recalled_in_a_retrieval_purpose_filter()
     {
         (_, Memory never, Memory compared, _) = await SeedMemoriesAsync();
-        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), compared.Uuid, RetrievalShape.FreeText, DateTimeOffset.UtcNow, RecallPurpose.CaptureComparison, Guid.NewGuid())]);
-        var legacy = await Reader.NeverRecalledAsync(new NeverRecalledRequest(DateTimeOffset.UtcNow, RecallPurpose: RecallPurpose.AllPurposes), Ct);
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), compared.Uuid, RetrievalShape.FreeText, SystemClock.Instance.GetCurrentInstant(), RecallPurpose.CaptureComparison, Guid.NewGuid())]);
+        var legacy = await Reader.NeverRecalledAsync(new NeverRecalledRequest(SystemClock.Instance.GetCurrentInstant(), RecallPurpose: RecallPurpose.AllPurposes), Ct);
         legacy.Select(row => row.MemoryUuid).ShouldBe([never.Uuid]);
-        var direct = await Reader.NeverRecalledAsync(new NeverRecalledRequest(DateTimeOffset.UtcNow, RecallPurpose: RecallPurpose.DirectRetrieval), Ct);
+        var direct = await Reader.NeverRecalledAsync(new NeverRecalledRequest(SystemClock.Instance.GetCurrentInstant(), RecallPurpose: RecallPurpose.DirectRetrieval), Ct);
         direct.Select(row => row.MemoryUuid).ShouldBe([never.Uuid, compared.Uuid], ignoreOrder: true);
-        var service = await Reader.NeverRecalledAsync(new NeverRecalledRequest(DateTimeOffset.UtcNow, RecallPurpose: RecallPurpose.ServiceRetrieval), Ct);
+        var service = await Reader.NeverRecalledAsync(new NeverRecalledRequest(SystemClock.Instance.GetCurrentInstant(), RecallPurpose: RecallPurpose.ServiceRetrieval), Ct);
         service.Select(row => row.MemoryUuid).ShouldBe([never.Uuid, compared.Uuid], ignoreOrder: true);
-        var defaultResult = await Reader.NeverRecalledAsync(new NeverRecalledRequest(DateTimeOffset.UtcNow), Ct);
+        var defaultResult = await Reader.NeverRecalledAsync(new NeverRecalledRequest(SystemClock.Instance.GetCurrentInstant()), Ct);
         defaultResult.Select(row => row.MemoryUuid).ShouldBe(direct.Select(row => row.MemoryUuid));
     }
 
@@ -74,7 +75,7 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
         await using var connection = await DataSource.OpenConnectionAsync(Ct);
         await using var command = new NpgsqlCommand("INSERT INTO public.recall_feedback (retrieval_id, shape, occurred_on, purpose) VALUES (@id, 'free_text', @now, 'private query text')", connection);
         command.Parameters.AddWithValue("id", Guid.NewGuid());
-        command.Parameters.AddWithValue("now", DateTimeOffset.UtcNow);
+        command.Parameters.AddWithValue("now", SystemClock.Instance.GetCurrentInstant());
         var error = await Should.ThrowAsync<NpgsqlException>(() => command.ExecuteNonQueryAsync(Ct));
         error.SqlState.ShouldBe(PostgresErrorCodes.CheckViolation);
     }
@@ -88,8 +89,8 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
 
         Writer.Record(
         [
-            new RecallFeedbackRecord(retrievalId, first, RetrievalShape.Unfiltered, DateTimeOffset.UtcNow),
-            new RecallFeedbackRecord(retrievalId, second, RetrievalShape.Unfiltered, DateTimeOffset.UtcNow),
+            new RecallFeedbackRecord(retrievalId, first, RetrievalShape.Unfiltered, SystemClock.Instance.GetCurrentInstant()),
+            new RecallFeedbackRecord(retrievalId, second, RetrievalShape.Unfiltered, SystemClock.Instance.GetCurrentInstant()),
         ]);
 
         List<(Guid RetrievalId, Guid? MemoryUuid, string Shape)> rows = await ReadRowsAsync();
@@ -103,7 +104,7 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     [Fact]
     public async Task Write_persists_miss_record_with_null_memory_uuid()
     {
-        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, DateTimeOffset.UtcNow)]);
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, SystemClock.Instance.GetCurrentInstant())]);
 
         List<(Guid RetrievalId, Guid? MemoryUuid, string Shape)> rows = await ReadRowsAsync();
         rows.Single().MemoryUuid.ShouldBeNull();
@@ -121,7 +122,7 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
             connection);
         command.Parameters.AddWithValue("r", Guid.NewGuid());
         command.Parameters.AddWithValue("m", DBNull.Value);
-        command.Parameters.AddWithValue("o", DateTimeOffset.UtcNow);
+        command.Parameters.AddWithValue("o", SystemClock.Instance.GetCurrentInstant());
 
         NpgsqlException ex = await Should.ThrowAsync<NpgsqlException>(() => command.ExecuteNonQueryAsync(Ct));
         ex.SqlState.ShouldBe(PostgresErrorCodes.CheckViolation);
@@ -143,11 +144,11 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     public async Task Never_recalled_excludes_recently_captured_and_recalled()
     {
         (_, Memory neverRecalled, Memory recalled, _) = await SeedMemoriesAsync();
-        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), recalled.Uuid, RetrievalShape.Unfiltered, DateTimeOffset.UtcNow)]);
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), recalled.Uuid, RetrievalShape.Unfiltered, SystemClock.Instance.GetCurrentInstant())]);
 
         IReadOnlyList<NeverRecalledRow> result =
             await Reader.NeverRecalledAsync(
-                new NeverRecalledRequest(DateTimeOffset.UtcNow), Ct);
+                new NeverRecalledRequest(SystemClock.Instance.GetCurrentInstant()), Ct);
 
         result.Select(r => r.MemoryUuid).ShouldBe([neverRecalled.Uuid]);
     }
@@ -156,11 +157,11 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     public async Task Never_recalled_accepts_an_as_of_with_a_non_utc_offset()
     {
         (_, Memory neverRecalled, Memory recalled, _) = await SeedMemoriesAsync();
-        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), recalled.Uuid, RetrievalShape.Unfiltered, DateTimeOffset.UtcNow)]);
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), recalled.Uuid, RetrievalShape.Unfiltered, SystemClock.Instance.GetCurrentInstant())]);
 
         IReadOnlyList<NeverRecalledRow> result =
             await Reader.NeverRecalledAsync(
-                new NeverRecalledRequest(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(2))), Ct);
+                new NeverRecalledRequest(SystemClock.Instance.GetCurrentInstant()), Ct);
 
         result.Select(r => r.MemoryUuid).ShouldBe([neverRecalled.Uuid]);
     }
@@ -168,12 +169,12 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     [Fact]
     public async Task Miss_rate_accepts_a_window_with_a_non_utc_offset()
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Instant now = SystemClock.Instance.GetCurrentInstant();
         Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, now)]);
         TimeSpan offset = TimeSpan.FromHours(2);
 
         MissRateResult result = await Reader.MissRateAsync(
-            new MissRateRequest(now.AddHours(-1).ToOffset(offset), now.AddHours(1).ToOffset(offset)), Ct);
+            new MissRateRequest(now.Plus(Duration.FromHours(-1)), now.Plus(Duration.FromHours(1))), Ct);
 
         result.Retrievals.ShouldBe(1);
         result.Misses.ShouldBe(1);
@@ -182,12 +183,12 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     [Fact]
     public async Task Miss_rate_over_window_is_derivable()
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Instant now = SystemClock.Instance.GetCurrentInstant();
         Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, now)]);
         Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), Guid.NewGuid(), RetrievalShape.Unfiltered, now)]);
 
         MissRateResult result =
-            await Reader.MissRateAsync(new MissRateRequest(now.AddHours(-1), now.AddHours(1)), Ct);
+            await Reader.MissRateAsync(new MissRateRequest(now.Plus(Duration.FromHours(-1)), now.Plus(Duration.FromHours(1))), Ct);
 
         result.Retrievals.ShouldBe(2);
         result.Misses.ShouldBe(1);
@@ -197,7 +198,7 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     [Fact]
     public async Task Reset_clears_feedback()
     {
-        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, DateTimeOffset.UtcNow)]);
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, SystemClock.Instance.GetCurrentInstant())]);
 
         int deleted = await Reader.ResetAsync(Ct);
 
@@ -217,14 +218,14 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
         Db.Memories.AddRange(never, recalled, recent);
         await Db.SaveChangesAsync(Ct);
 
-        await AddVersionAsync(never.Id, DateTimeOffset.UtcNow.AddDays(-30));
-        await AddVersionAsync(recalled.Id, DateTimeOffset.UtcNow.AddDays(-30));
-        await AddVersionAsync(recent.Id, DateTimeOffset.UtcNow);
+        await AddVersionAsync(never.Id, SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-30)));
+        await AddVersionAsync(recalled.Id, SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-30)));
+        await AddVersionAsync(recent.Id, SystemClock.Instance.GetCurrentInstant());
 
         return (group, never, recalled, recent);
     }
 
-    private async Task AddVersionAsync(long memoryId, DateTimeOffset createdOn)
+    private async Task AddVersionAsync(long memoryId, Instant createdOn)
     {
         MemoryVersion version = TestEntities.NewVersion(memoryId, 1, "Claim");
         version.CreatedOn = createdOn;

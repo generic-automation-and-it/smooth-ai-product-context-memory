@@ -1,8 +1,9 @@
 ---
 name: ai-understanding
-description: Export this session's hard-won knowledge into Understandings under .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md (one file per unit, grouped into a subject folder stamped with when it was created), import matching ones back at task start, and publish/consume them across workspaces as a zip. Trigger on "export the understandings", "make an Understanding of this", "encode this", "what did we learn", "/ai-understanding", or when a session resolved something that cost real effort and would cost the same again. Not a session log and not code documentation.
+description: Export this session's hard-won knowledge into Understandings under .context/understandings/<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md (one file per unit, grouped into a subject folder stamped with when it was created), import matching ones back at task start, and publish/consume them across workspaces as a zip. Trigger on "export the understandings", "make an Understanding of this", "encode this", "what did we learn", "/ai-understanding", or when a session resolved something that cost real effort and would cost the same again. Not a session log and not code documentation.
 allowed-tools:
   - Bash(python3 .agents/skills/ai-understanding/scripts/understanding_index.py:*)
+  - Bash(python3 .agents/skills/ai-understanding/scripts/session_marker.py:*)
   - Bash(zip:*)
   - Bash(unzip:*)
   - Read
@@ -19,32 +20,35 @@ Export and import are about **this session's memory**: export writes what the se
 
 | Switch | Effect |
 |--------|--------|
-| `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<subject>-<yyyyMMdd-HHmm>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
-| `--export --all [--path <dir>]` | Same, but breadth-first: write every candidate without pausing for the user to cut the list, **and hold the qualifying bar loosely** — a marginal candidate is written, not dropped, because the user prunes afterwards |
-| `--export --dontask [--path <dir>]` | Same, but skips the "Export split" ask and takes the recommended option as analysed by the AI. **Does not** widen the qualifying bar — a marginal candidate is still dropped if it does not qualify, unlike `--all` |
-| `--import` | Load Understandings whose question matches one the task will make you ask |
+| `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<yyyyMMdd-HHmm>-<session-id>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
+| `--export --all [--path <dir>]` | Same, but skip the split ask **and re-export the whole scope as upserts instead of this run's delta** — an unchanged in-scope unit is re-written, not skipped. **Never loosens the qualifying bar and never bypasses the decision threshold** (LADR-014) |
+| `--export --dontask [--path <dir>]` | Same, but skips the "Export split" ask and takes the recommended option as analysed by the AI. **Does not** re-export the whole scope — it writes this run's delta, exactly as a normal export does |
+| `--import [--nomarker]` | Load Understandings whose question matches one the task will make you ask; a marked import sets the session marker (below) |
 | `--publish [--portable-only] [--path <target>]` | Write every unit to a zip under `.context/understandings-publish/`, or to `--path` when given; `--portable-only` restricts the archive to `scope: portable` units |
 | `--consume <zip> [--path <dir>]` | Unpack a published archive into the working store — `.context/understandings/` by default, or `--path` when given |
 | `--promote <slug>` | Escalate an Understanding to a `*AGENTS.md` context file or a rule |
 | `--index` | Regenerate `INDEX.md` from the store |
-| `--review` | Advisory decay report — what is contested, never inherited, or overdue a re-check |
+| `--review` | Advisory decay report — what is contested, never inherited, or overdue a re-check. With `--decisions`, adds an advisory best-role/margin column scored by the same gate settings |
 
-`--all` applies only to `--export`, where it means two things at once: **skip the cut**, and **widen
-what qualifies**. The second half is the one that gets lost — an agent can honour "never ask" to the
-letter while filtering hard upstream, and still report one unit as a complete export. Under `--all`,
-resolve a marginal candidate toward writing it: the user asked for breadth and prunes what they did not
-want. `--publish`'s scope filter is a separate switch, `--portable-only` — the two are unrelated despite
-the old design overloading `--all` for both.
+`--all` applies only to `--export`, where it means two things at once: **skip the cut**, and **re-export
+the whole scope as upserts** instead of this run's delta. The normal path is a delta — it writes only this
+run's `new`/`improved` units and never a copy of an unchanged unit. `--all` instead re-exports every
+in-scope unit: an unchanged one is re-written as a fresh stamped copy (with `provenance.supersedes`,
+LADR-010), so a sourced scope (a file or directory given as the focus, or the session) is fully refreshed
+rather than shown as a diff. **It never loosens the qualifying bar and it never bypasses the decision
+threshold** (LADR-014): a below-threshold unit is held or marked exactly as in a normal export. `--publish`'s
+scope filter is a separate switch, `--portable-only` — the two are unrelated despite the old design
+overloading `--all` for both.
 
 `--all` does **not** turn proposals into commitments, and it does **not** override the qualifying
 test. An unbuilt recommendation is still a proposal: label it as proposed and record that it was
 not approved or implemented. Toolchain knowledge still goes to its `*AGENTS.md` home, even when
-the user asks for every candidate. Breadth means "show the marginal qualifying residue", not
+the user asks for every candidate. Breadth means "re-export the whole in-scope set", not
 "store everything mentioned in the session".
 
 `--dontask` applies only to `--export`, where it skips the "Export split" `AskUserQuestion` and
 takes the recommended option (write every candidate) as analysed by the AI. Unlike `--all`, it
-does **not** widen the qualifying bar — it only skips the ask.
+does **not** re-export the whole scope — it writes this run's delta, exactly as a normal export does.
 
 `--path` is always the **target** a mode writes to, overriding its default — never a source.
 `--consume`'s source stays positional.
@@ -61,6 +65,10 @@ so the split proposal leads with the units inside it. It narrows nothing by itse
 outside the focus is still proposed, so the user cuts it rather than never seeing it. With no focus given,
 infer the subject from the session as before. The other modes' positional arguments are their own —
 `--consume`'s source and `--promote`'s slug are never read as a focus.
+
+On `--export`, `--scope <path>` optionally names a **file or directory as the source to distill** — the
+default scope is the session. `--all` re-exports the whole scope, so a file/dir scope is what turns
+`--all` into a full re-derivation of that source rather than a session delta.
 
 Single-dash spellings of the long switches (`-all`, `-export`) are accepted as typed — they are
 unambiguous here, and rejecting them would fail a run for a keystroke. An unrecognised switch is not
@@ -88,7 +96,7 @@ The working store is **local and disposable** (`.context/` is gitignored). That 
 
 ## TL;DR
 
-1. Working store: `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` — a stamped folder is **one export run**, holding only what that run produced.
+1. Working store: `.context/understandings/<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md` — a stamped folder is **one export run**, holding only what that run produced.
 2. `.context/understandings/INDEX.md` is a generated table of **unit + description + question**, one row per slug resolving to its newest version — the only file an agent reads to decide what to load, and the **first thing an export reads**.
 3. One session may yield **several** Understandings; each is its own file, each stands alone, and they share a `provenance.session` value.
 4. A slug is a version key, not a unique name. Same question → reuse the slug and write the complete improved unit into this run's folder. Different question → distinct slug. Never edit or delete a previous copy; newest wins.
@@ -99,13 +107,20 @@ The working store is **local and disposable** (`.context/` is gitignored). That 
 ```
 .context/understandings/
   INDEX.md                    # generated — one row per slug, resolving to its newest version
-  <subject>-<yyyyMMdd-HHmm>/  # ONE EXPORT RUN — holds only what that run produced
-    <slug>.understanding.md   # one Understanding (frontmatter + body)
-    <slug>.assets/            # only when a unit carries artifacts — repro, log excerpt, diagram
-  _unfiled/                   # exempt from the stamp — a permanent catch-all, not a body of work
+  <yyyyMMdd-HHmm>-<session-id>/  # ONE EXPORT RUN — holds only what that run produced
+    <category>/                # dateless subject; recurs across runs
+      <slug>.understanding.md  # one Understanding (frontmatter + body)
+      <slug>.assets/           # only when a unit carries artifacts — repro, log excerpt, diagram
+  _unfiled/                    # exempt from the stamp — a permanent catch-all, not a body of work
 ```
 
-**A stamped folder is one export run; a slug is the knowledge.** The same slug appearing in several stamped folders is a **version chain**, not an error: the newest stamp is the current version, the rest are history. `INDEX.md` lists the current version only. The subject *name* is reused across runs so a body of work stays browsable together; the *stamp* is new every run. Use `_unfiled/` for an Understanding belonging to no particular topic.
+The legacy `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` shape is **still read and never
+written**: existing stores keep working untouched, and a new run writes beside them rather than
+moving anything.
+
+**A run folder is one export run; a slug is the knowledge.** The same slug appearing in several run folders is a **version chain**, not an error: the newest stamp is the current version, the rest are history. `INDEX.md` lists the current version only. The *category* is reused across runs so a body of work stays browsable together; the *stamp and session* are new every run. Use `_unfiled/` for an Understanding belonging to no particular topic.
+
+The stamp keeps its `-HHmm`, and that is load-bearing rather than incidental: the stamp is the sort key that decides which copy of a slug is current, and the `updated` fallback is a required but **date-only** field. A date-only stamp would collapse every export on one day into one recency bucket and silently mark the wrong version current. One export run per minute is the assumption that keeps it correct.
 
 Almost every unit is a single file — evidence normally belongs inline, quoted in the body, where a reader sees it without opening anything.
 
@@ -151,8 +166,8 @@ between them**, and *What qualifies: nothing with another home* below is what de
 applies — so no candidate ever maps to both, and an absent-index candidate is not `new` until that test
 has been run on it. `has another home` is the exclusion's only reporting slot, and prose does not satisfy
 it: **name the file that holds the knowledge**, or the skip is unauditable and indistinguishable from a
-candidate you forgot. Under `--all` it should be rare — the bar is loose there, and a document that
-covers part of the knowledge is not a claim on the rest.
+candidate you forgot. Under `--all` it should be rare — the re-export covers the whole scope, and a
+document that covers part of the knowledge is not a claim on the rest.
 
 **Judge "same question" generously.** This step decides everything, and judging it strictly is what
 produced three answers to one question under three slugs. The test:
@@ -178,17 +193,53 @@ unit and setting it aside is not inheritance. If the run genuinely inherited not
 field back to find units nothing ever inherits, and a store where no unit carries it makes `--review`
 report "nothing flagged" because it has nothing to read.
 
-**Report every candidate under one of the five outcomes**, and give `has another home` the path it
+**Report every candidate under one of the six outcomes**, and give `has another home` the path it
 requires. A silent skip is indistinguishable from a missed export.
+
+### The value gate (optional)
+
+When the decision settings are present and `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, each `new` and
+`improved` unit is scored for role value **before it is written**. `already known` and `has another home`
+units are never scored. The gate is a subprocess CLI copied into this skill's `scripts/` (`decisions_gate.py`,
+`decisions_rubric.json`, `redact.py`) — a **WET copy** from Mímisbrunnr, so this skill runs where no
+`mimisbrunnr-*` is installed. The wiring is `scripts/gate_decisions.py` (owned here, not copied).
+
+- **Settings** — the eleven `CONTEXT_MEMORY_DECISIONS_*` keys (`ENABLED`, `BASE_URL`, `PATH`, `MODEL`,
+  `API_KEY`, `MIN_PROBABILITY`, `MAX_ATTEMPTS`, `ROLES`, `BELOW_THRESHOLD`, `TIMEOUT`,
+  `LEDGER_MAX_ENTRIES`). Read from the process environment only, then the built-in defaults — never
+  from a file. Mímisbrunnr's run scripts add the missing ones to your shell profile; the skill never
+  writes them. **The 5 `DEDUP_*` keys are not this skill's** — ignore them.
+  Off unless configured: absent settings or a non-`true` flag skips the gate, makes **zero network calls**,
+  and the export report says `decisions: not configured` or `decisions: disabled` once.
+- **For each new/improved unit:** build a record with `gate_decisions.unit_record(unit)`, send the batch to
+  `gate_decisions.score(records, ledger)` (the gate redacts first and fails closed, and a size-guard holds
+  an oversize unit rather than truncating it), then `gate_decisions.classify(result, belowThreshold,
+  maxAttempts)` returns the action:
+  - `write` — write the unit; `audience:` may be `passingRoles`.
+  - `rewrite` — the unit fell below the bar with budget left. Rewrite under the same contract (no new
+    claims, every condition and boundary kept, slug/question/provenance unchanged) and re-score. The
+    **script** enforces `MAX_ATTEMPTS` via a ledger kept **outside the store** (a temp path sibling
+    sessions wipe); the store must never hold the ledger.
+  - `held` — below the bar after the last attempt, with `BELOW_THRESHOLD=hold`. **Not written.** Reported
+    under the sixth outcome **`held (below value)`** with its scores. **There is no review queue here** —
+    a held unit is reported in the export output and goes nowhere else.
+  - `mark` — below the bar after the last attempt, with `BELOW_THRESHOLD=mark`. Written with frontmatter
+    `value: below-threshold` and the scores under `decisions:`.
+- **`--all` never bypasses the threshold** (LADR-014): a below-threshold unit is held or marked exactly as
+  in a normal export. `--all` only changes scope coverage.
+- A down/unreachable/timed-out or malformed model **skips the gate** for the unit with a classified reason —
+  it never blocks the export and never reads as a low score; the unit is written ungated. `classify`
+  returns `write` with `detail` naming the cause.
+- The gate defaults to a loopback endpoint; a non-loopback URL is accepted only over https with `API_KEY`.
 
 ### What a run writes
 
-- **A run that produces something writes one new stamped folder** `<subject>-<yyyyMMdd-HHmm>/`, holding
-  **only that run's output** — the `new` and `improved` units. It is not a snapshot of the store, and an
-  unchanged unit is never copied into it.
+- **A run that produces something writes one new run folder** `<yyyyMMdd-HHmm>-<session-id>/`, holding
+  **only that run's output** — the `new` and `improved` units (except under `--all`, which re-exports every in-scope unit as an upsert per LADR-014). It is not a snapshot of the store, and an
+  unchanged unit is never copied into it on the normal delta path.
 - **A run that produces nothing writes nothing and creates no folder.** An export reporting only
   `already known` is a **correct outcome**, not a failure — say so, or agents pad the store to look
-  productive. An empty stamped folder is reported as a problem by the generator.
+  productive. An empty run folder is reported as a problem by the generator.
 - **Export is idempotent.** Export twice in one session and the second run writes nothing, leaving the
   store byte-identical. State that: it is the property that makes the reconcile step worth having.
 - **An improved unit is written in full**, standing alone and readable without the version it replaces —
@@ -251,10 +302,13 @@ A single session frequently contains more than one durable lesson. Split it — 
 
 When proposing a split, ask with `AskUserQuestion` — recommend **write every candidate** first, with
 cutting specific slugs as the alternative, rather than a prose list a reader could mistake for output.
-**With `--all`, skip the ask entirely and widen the bar** — write every candidate, resolving a marginal
-one toward writing rather than dropping, and report what was written, so the user prunes afterwards
-instead of beforehand. `--all` is a request for breadth: a one-unit export out of a session carrying
-several lessons answers the letter of the switch and defeats its purpose.
+**With `--all`, skip the ask entirely and re-export the whole scope** — write every in-scope unit as an
+upsert (an unchanged one as a fresh stamped copy), and report what was written so the user prunes
+afterwards. `--all` is a request for scope coverage: a one-unit export out of a session carrying
+several lessons answers the letter of the switch and defeats its purpose. `--all` does **not** loosen
+the qualifying bar or bypass the decision threshold (LADR-014).
+**With `--dontask`, skip the ask but keep the scope** — write every candidate that qualifies under the
+normal test, and drop a marginal one exactly as an unflagged export would.
 
 ### Redact before you write
 
@@ -263,34 +317,62 @@ are **exportable by design**, so a value that lands in one is a value that leave
 Redaction belongs here, at write time; the pre-publish check in `references/publish-consume.md` is the
 second net, not the first.
 
-Write `<REDACTED>` in place of any credential, token, connection string, or internal hostname, and quote
-only the lines of an artifact that carry the signal. Record the **shape** of the problem rather than the
+Write `<REDACTED>` in place of any credential, token, connection string, or internal hostname, and of any
+personal data — information relating to an identifiable person: a name, email or UPN, an employee number, a
+badge or card identifier, group membership — and quote only the lines of an artifact that carry the signal.
+Personal data is never written to disk here, and a repository's own `AGENTS.md` may name more identifiers
+it prohibits; those are redacted the same way. Record the **shape** of the problem rather than the
 value: that a connection string was missing `Enlist=false` is the knowledge, the connection string is not.
 
 If the redacted form no longer carries the knowledge, the unit is the wrong size — state the shape in prose
 instead, or say so and ask. Never keep a value in order to preserve a lesson.
 
 **Striking a value already on disk is the one edit allowed to an existing copy.** Immutability protects
-knowledge, and a credential is not knowledge — so replace it with `<REDACTED>` in place, in every copy that
-carries it, rather than writing a new version and leaving the value in history. Report it as a redaction,
+knowledge, and a credential or personal data is not knowledge — so replace it with `<REDACTED>` in place, in
+every copy that carries it, rather than writing a new version and leaving the value in history. Report it as a redaction,
 never as an `improved` unit: nothing about the knowledge changed.
 
 ### Writing one
 
-Copy `assets/UNDERSTANDING.template.md` to `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` — or under `--path` when given — and fill it.
+Copy `assets/UNDERSTANDING.template.md` to `.context/understandings/<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md` — or under `--path` when given — and fill it.
 
 Subject **name**: kebab-case, names the topic or piece of work. Reuse the name a body of work already
-uses in the store — `ls .context/understandings/` shows them — so its runs stay browsable together.
+uses in the store — `INDEX.md` groups current units by subject, and the Glob tool on
+`.context/understandings/*/*.understanding.md` lists every folder — so its runs stay browsable together.
 
-Subject **folder**: always new, always this run. Create `<subject>-<yyyyMMdd-HHmm>/` with the current UTC
-time, 24-hour (`date -u +%Y%m%d-%H%M`, e.g. `20260919-1432`), and write this run's output into it. Never
-write into a folder an earlier run created. The one exception is a second export in the same minute with
-the same subject: the name collides, so write into it — it is the same run for practical purposes, and the
-stamp does not gain seconds to avoid this.
+Subject **folder**: always new, always this run. Create `<yyyyMMdd-HHmm>-<session-id>/` (current UTC
+time, 24-hour (`python3 .agents/skills/ai-understanding/scripts/understanding_index.py --stamp`, e.g.
+`20260919-1432`), and write this run's output into it. Never
+write into a folder an earlier run created.
+
+**Resolve the run folder once, then reuse the value verbatim for every unit of this run:**
+
+```bash
+python3 .agents/skills/ai-understanding/scripts/understanding_index.py --run-folder
+```
+
+It takes the session id as an argument or from the environment, resolves the clock once, and prints the
+finished folder name. **Call it once per export and copy the output into every path you write** — do
+not re-run it per unit. Re-deriving the stamp between two units can land either side of a minute
+boundary and split one run across two folders, each holding half of it, which breaks the version chain
+in a way no later check repairs. An id containing a character outside `[A-Za-z0-9._-]` is rewritten
+with a digest appended, because a separator would nest the units and drop them from the index silently.
+
+Prefer a session id that begins with its own timestamp (`ses_20260919-1432-…`): it makes two runs in
+the same minute resolve by recency rather than lexically. Nothing enforces that, so treat it as a
+preference, not a guarantee.
+
+The one exception is a second export in the same minute **for the same session**: the name collides, so
+write into it — it is the same run for practical purposes, and the stamp does not gain seconds to avoid
+this.
+
+**Category**: kebab-case, the subject a unit is filed under, nested inside the run folder and dateless
+— the same category recurs across runs, which is what makes `**/<category>/*.md` answer "all X ever".
+The browsing group is derived from that directory, so it is never written into frontmatter and cannot
+drift.
 
 `_unfiled` is the home for a one-off that belongs to no topic, carries no stamp, and sorts oldest when it
-holds a copy of a versioned slug. The subject is derived from the parent folder, so it is never written
-into frontmatter and cannot drift.
+holds a copy of a versioned slug.
 
 Slug: kebab-case, names the **knowledge**, not the incident. `npgsql-enum-mapping-needs-datasource` — not `tuesday-db-bug`. The file is the slug plus the `.understanding.md` postfix — `npgsql-enum-mapping-needs-datasource.understanding.md` — which is what a path glob selects on, so a unit written without it is invisible to the generator and reported as a rename.
 
@@ -307,11 +389,14 @@ Frontmatter fields:
 | `agents_context` | Path to the nearest `*AGENTS.md` this bears on, when it concerns a specific code area |
 | `recheck` | **Optional.** One command that re-checks whether this still holds, runnable exactly as written. `--review` prints it beside a staleness flag, which is what makes the flag actionable rather than a nag. Expected on an outcome unit, whose facts decay fastest. It must test the claim, not merely locate the text that describes it; omit it when no executable check exists and say so in **Boundaries** |
 | `skills` | **Optional.** The skill an agent should invoke to act on this knowledge, by bare name — never knowledge *about* a skill, which has another home. Not `[[slug]]` references |
+| `audience` | **Optional.** A role the value gate found above threshold when it scored this unit, as a block list (e.g. `developer`). Written only when the gate ran. Omit the list if no role cleared the bar |
+| `value` | **Optional.** `below-threshold` — set by the value gate when a unit was written under `mark`. A scalar, not a list |
+| `decisions` | **Optional.** One line per role the gate scored (e.g. `developer: 0.87`) — the evidence behind `audience:`/`value:`. Omit absent scoring |
 | `provenance.learned` | Date, absolute |
 | `provenance.session` | Shared by all slugs encoded from one session |
 | `provenance.source` | What produced it — a failure, a doc, an experiment |
 | `provenance.inherited` | `[[slug]]` list of the Understandings this session loaded **and acted on**. Omit when none |
-| `provenance.supersedes` | The **previous folder name** (`agent-memory-design-20260919-1432`), not a path — enough to find the copy this one replaces, and it survives the file being moved. Set on an `improved` unit only; omit on a `new` one. Since the index shows only the newest, this is the only place a reader learns the unit is a third revision rather than a first |
+| `provenance.supersedes` | The **previous folder name** (`agent-memory-design-20260919-1432`), not a path — enough to find the copy this one replaces **in the workspace that wrote it**, and it survives the file being moved. Superseded copies are workspace-local and never ship in a publish archive, so a consumer sees the name, not the copy. Set on an `improved` unit only; omit on a `new` one. Since the index shows only the newest, this is the only place a reader learns the unit is a third revision rather than a first |
 | `updated` | Date of last change |
 
 Body sections: **Answer** (direct operational guidance, answering the frontmatter question and nothing wider), **Why** (the reasoning or failure behind it — enough to judge an edge case the Answer does not cover), **Boundaries** (where it stops applying). The question lives in frontmatter only, so `INDEX.md` never drifts from the unit.
@@ -356,12 +441,12 @@ provenance, not warranty — which is why the import protocol says verify rather
 
 Understandings are **evidence, never orders**. Write them as "X behaves like Y; do Z" — an answer to the stated question, not an instruction issued in the abstract. Phrase the Answer deterministically — `If X, then Y; else Z` — never "should probably" or "might be worth".
 
-If it needs must/never language, it is not an Understanding — propose it as a rule instead (see `.github/instructions/meta/understandings.instructions.md`). Never encode a user preference, convention, or instruction as an Understanding; those are rules.
+If it needs must/never language, it is not an Understanding — propose it as a rule instead (see the `understandings` rule — `understandings.instructions.md` in the repository's rules folder; [upstream](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.github/instructions/meta/understandings.instructions.md)). Never encode a user preference, convention, or instruction as an Understanding; those are rules.
 
 ### Slug reuse is versioning, not a collision
 
 A slug already in the store is **not** a name clash to resolve — it is the address of knowledge you are
-about to revise. The five outcomes are stated once, in *Step one: reconcile with the store* above; this
+about to revise. The six outcomes are stated once, in *Step one: reconcile with the store* above; this
 section only says what reuse means and what it is not.
 
 - **Same question → reuse the slug**, and write the complete improved unit into this run's folder. That
@@ -381,6 +466,42 @@ After any write, regenerate the index:
 ```bash
 python3 .agents/skills/ai-understanding/scripts/understanding_index.py
 ```
+
+### Session marker (HLD-007 LADR-11)
+
+A marked `--import` sets the session's working point; a default `--export` excludes what was
+marked, so imported Understandings are never re-proposed as new. The marker is client-side only:
+`.context/session-markers/ai-understanding-<session-id>.json` (an ID with characters outside `A-Za-z0-9._-` gets a short digest suffix so distinct IDs never share a file; references — slug ids and subjects,
+or selector + as-of — never unit bodies; no Host change). One marker per skill; this export reads
+only its own. Session id: an explicit `--session <id>` (passed as `--session` to the commands
+below) wins; else the first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,
+`OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`; else no marker.
+
+- On `--import`, record what was loaded (unless `--nomarker`):
+  `python3 .agents/skills/ai-understanding/scripts/session_marker.py record --type ai-understanding --verb import
+  --slug "<slug>::<question>" ... [--session ID]` (repeat `--slug` per unit — a file's identity is its
+  slug, and the export's exclusion is by slug, so a unit recorded any other way is re-proposed as new;
+  `--item` is the store's `id[:version[:subject]]` and excludes nothing here; `--selector` with a JSON
+  object records the filter, not the units, so it supplements the per-unit `--slug` and never replaces
+  it). It prints one `Marker:` line
+  (`set`, `extended`, `skipped (--nomarker)`, `none`).
+- `--import --nomarker` loads history that flows into a default `--export` (still logged with
+  `nomarker: true`); an id both marked and `--nomarker` stays excluded. No marker (or only
+  `--nomarker`/id-less imports) means a default export behaves as `--all`.
+- On `--export`, print the boundary first:
+  `python3 .agents/skills/ai-understanding/scripts/session_marker.py boundary --type ai-understanding [--all] [--session ID]`
+  (`marker <time>, N excluded` | `none` | `ignored (--all)` | `refused` — an unreadable marker, exit 2:
+  write nothing by default; inspect or move the file, or re-run with `--all`). A default export skips units whose
+  slug is in the exclusion set; a unit that changes an excluded one is written as an `improved`
+  version of that slug (supersession), never dropped and never a new slug. `--export --all`
+  ignores the marker (still the whole-scope re-export of LADR-014, never a looser bar).
+- On a successful `--export`, record what was written (unless `--nomarker`):
+  `python3 .agents/skills/ai-understanding/scripts/session_marker.py record --type ai-understanding --verb export
+  --path "<subject>-<stamp>/<slug>.understanding.md" --slug "<slug>::<question>" ... [--session ID]`
+  (repeat `--slug` per unit). The marker follows the receipt: dry runs, refusals and empty
+  exports mark nothing. `--export --nomarker` exports normally but writes no entry. It prints one `Marker:` line (`set (export, N items)` |
+  `skipped (--nomarker)` | `skipped (nothing written)` | `none (no session id)`). Use
+  `session_marker.py show --type ai-understanding` to read the exclusion set back.
 
 ## Import (`--import`)
 
@@ -436,7 +557,11 @@ python3 .agents/skills/ai-understanding/scripts/understanding_index.py --review
 | `never inherited` | The question probably does not match what anyone asks. Re-word it, or accept the unit was never needed and prune it. Counts inheritance of **any** version of the slug, so a unit revised three times is not reported unused because the lineage names an earlier copy |
 | superseded copies | How many revisions of a slug sit on disk unlisted. Prune guidance only — nothing removes history automatically, and a deep chain is signal that the knowledge is still moving |
 | overdue re-check | Run the unit's `recheck` command — the report prints it beside the flag — then read the unit against what it says. Outcome units are flagged after 30 days, knowledge after 90. A flagged unit carrying no `recheck` is reported as carrying none: add one while you are in there |
-| `unpublished` | The store is gitignored and these units are in no archive under `.context/understandings-publish/`, so they would vanish with this workspace. Judged by **membership**, never archive time — a `--portable-only` archive is newer than the `repo-specific` units it left out. An archive written elsewhere with `--path` is not seen, so its units stay listed. Run `--publish` to carry them out (LADR-008: the zip is the only durable form). Listed only when the store is gitignored — the guard reports the store's own `git check-ignore` answer, and a tracked store reports nothing |
+| `unpublished` | The store is gitignored and these **current** units are in no archive under `.context/understandings-publish/`, so they would vanish with this workspace. Judged by **membership**, never archive time — a `--portable-only` archive is newer than the `repo-specific` units it left out — and only an archive `--consume` would accept counts — a damaged member, an escaping or symlink entry, or two entries landing on one path makes the whole archive prove nothing, since none of it could be restored. A unit with a local `<slug>.assets/` counts only when every asset file is a restorable member of the same archive, since a unit restored without its repro or diagram is not the unit that was learned. The archived bytes must also be the working copy's — the unit's, discounting only the `provenance.published_from` line and `--portable-only` unbracketing publish itself adds, and every asset's exactly — so a unit redacted in place or an asset refreshed after the last publish is listed again. An archive written elsewhere with `--path` is not seen, so its units stay listed. Run `--publish` to carry them out (LADR-008: the zip is the only durable form). Superseded copies are never listed here: publish archives current versions only, so history is workspace-local by design and a warning `--publish` could never clear would only teach the operator to ignore it. Listed only when the store is gitignored — the guard reports the store's own `git check-ignore` answer, and a tracked store reports nothing |
+
+`--review --decisions` adds an **advisory** best-role and margin column for each current unit, scored with
+the same gate settings. It never changes the exit code and never rewrites a unit; it is skipped (with
+`decisions:` visible) when the gate is not configured.
 
 Advisory only — it never changes the exit code, because none of it is wrong, it is just decaying. Act on it
 when you are already in the store; do not make a project of it. Every run on a gitignored store also
@@ -452,8 +577,8 @@ gitignored, so an archive that someone keeps is the only form that survives the 
 The store is never shared through the repository (LADR-008).
 
 - Destination: `.context/understandings-publish/understandings-<YYYYMMDD-HHMMSS>.zip` by default, or `--path` (a file or directory) when given. Outside the store, so the index generator never mistakes it for a subject folder, and never a tracked path.
-- The archive mirrors the store: `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
-- Publishing filters **per Understanding, not per subject** — a subject folder routinely mixes scopes. By default every unit publishes; pass `--portable-only` to restrict the archive to `scope: portable` units, for the cross-repo case. Never let `--portable-only` publish a `repo-specific` unit — that filter is the only thing preventing a local quirk from being shipped to another repo with provenance that makes it look universally verified.
+- The archive mirrors the store's **current** units: `<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
+- Publishing filters **per Understanding, not per subject** — a subject folder routinely mixes scopes. By default every current unit publishes (superseded copies never do); pass `--portable-only` to restrict the archive to `scope: portable` units, for the cross-repo case. Never let `--portable-only` publish a `repo-specific` unit — that filter is the only thing preventing a local quirk from being shipped to another repo with provenance that makes it look universally verified.
 - When `--portable-only` excludes a unit that a published unit links to, the archived copy drops the brackets around that `[[slug]]` and keeps the entry, so the archive's own index validates.
 - Each archived copy records `provenance.published_from`; the working copy is left in place.
 - No approval needed to write — the default destination or an explicit `--path` is the consent. Report what was published: the count, the destination, and the slugs, grouped by subject.
@@ -464,7 +589,13 @@ Sharing is sending someone the zip. Full contract: `references/publish-consume.m
 
 The reverse of publish: another workspace's archive becomes available here.
 
-The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Extraction refuses any entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks) and rejects the whole archive rather than unpacking part of it.
+The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Before extracting anything, run the pre-extraction gate and extract nothing unless it exits `0`:
+
+```bash
+python3 .agents/skills/ai-understanding/scripts/understanding_index.py --consume-check <zip> [store-dir]
+```
+
+It refuses the whole archive — never part of it — on an entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks), a symlink entry, a member whose data does not read back cleanly, or a case-folded collision with another entry or a local path. Details: `references/publish-consume.md`.
 
 Reconciliation, per incoming slug. The key is the slug; an incoming copy keeps its own stamped folder, because a slug in two folders is a version chain rather than an error:
 
@@ -480,12 +611,14 @@ Consuming never silently changes what this workspace already believes. Incoming 
 
 An Understanding that keeps proving true has outgrown the disposable store:
 
-- Concerns a specific code area → fold into the nearest `*AGENTS.md`, following `.github/instructions/meta/knowledge-conventional-contexts-quality.instructions.md`.
+- Concerns a specific code area → fold into the nearest `*AGENTS.md`, following the `knowledge-conventional-contexts-quality` rule ([upstream](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.github/instructions/meta/knowledge-conventional-contexts-quality.instructions.md)).
 - Applies to nearly every task, or has become a decision rather than an observation → propose a rule under `.github/instructions/`, following `manage-rule-system`.
 
 **Three independent sessions is the threshold, and the evidence is `provenance.inherited`.** A unit that
-has been inherited in three distinct `provenance.session` values has been re-derived rather than recalled;
-propose promoting it. **Nothing counts that for you** — `--review` reports only `never inherited`, which
+has been inherited in three distinct `provenance.session` values keeps recurring in real work; propose
+promoting it. Recurrence is not verification — inheriting a unit means it shaped the work, not that it
+was re-checked — so judge `confidence` separately, and promote an `observed` unit only after verifying
+it. **Nothing counts that for you** — `--review` reports only `never inherited`, which
 is the complementary signal, so the count is read by hand: open every unit whose `provenance.inherited`
 names this slug and count the distinct `provenance.session` values on them. Below three, propose anyway
 only if you **state why** — name what makes this the exception (a cost that repeats, a decision already
@@ -502,16 +635,18 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 ## Guardrails
 
 - Writing to a mode's default location, or to an explicit `--path`, needs no approval — the location was already chosen, by default or by the user typing it. Report what was written and where, every time; removing the prompt must not remove the user's chance to notice.
-- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the five outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to hold the qualifying bar loosely, writing a marginal candidate rather than dropping it. With `--dontask`, skip the ask and take the recommended option (write every candidate) as analysed by the AI.
+- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the six outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to re-export the whole scope. With `--dontask`, skip the ask and take the recommended option (write every candidate) as analysed by the AI.
+- A unit the value gate holds is reported only — it is never written and never queued. There is **no review queue** in this skill; Mímisbrunnr's is Mímisbrunnr-only, and the WET rule forbids importing it. A held unit's scores are reported in the export output and go nowhere else.
 - Never edit, overwrite or delete an existing copy of a slug. An improvement is a new complete copy in this run's folder; history is immutable. The **one** exception is striking a credential value that should never have been written — see *Redact before you write*; that is a repair, not a revision.
 - Never write an Understanding in must/never language.
 - Never let an Understanding contradict a rule without flagging it.
-- No secrets, tokens, or credential values in an Understanding — they are exportable by design. Redact at write time, writing `<REDACTED>` in place of the value, and record the shape of the problem instead — see *Redact before you write*. Never keep a value in order to preserve a lesson.
+- No secrets, tokens, credential values or personal data in an Understanding — they are exportable by design. Redact at write time, writing `<REDACTED>` in place of the value, and record the shape of the problem instead — see *Redact before you write*. Never keep a value in order to preserve a lesson.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-11 | **Optional decision (value) gate on `--export`, and `--all` redefined.** When `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, each `new`/`improved` unit is scored for role value before it is written; a below-bar unit is `held (below value)` (not written) under `hold`, or written with `value: below-threshold` under `mark`, with passing roles carried into `audience:`. The gate is a **WET copy** (`decisions_gate.py`, `decisions_rubric.json`, `redact.py` — no `mimisbrunnr-*` import) wired by `gate_decisions.py`. Off unless configured: absent settings make zero network calls and report `decisions: not configured`/`disabled` once. A down/unreachable/timed-out/malformed model skips the gate (never a low score). **`--all` = re-export the whole scope as upserts, and it never bypasses the threshold** (LADR-014 — was "widen the bar"). `--scope <path>` names a file/dir source to distill (default session). `--review --decisions` adds an advisory best-role/margin column. There is **no review queue** — a held unit is reported only. | this PR |
 | 2026-10-01 | **Promotion gained a threshold, and the evidence for it.** `--promote` proposed on any judgement call; it now proposes after the unit has been **inherited in three independent sessions** (`provenance.inherited` on the units a later session exported), or states why it is proposing earlier. Evidence-based, so the user still decides — the threshold gates the *proposal*, not the decision. The same arithmetic was added as guidance for `propose-label` in `mimisbrunnr-odin-context-memory` (a label seen once is a word, three times is vocabulary), and `--review`'s existing `never inherited` flag is named as the other half of the signal. Wording only; no script change and no test tier. **Divergence from the devex template** — this skill is template-owned, so `ai-template-sync` would revert it; upstream it or keep this row. | ICM adoption |
 | 2026-09-19 | Initial version. | |
 | 2026-09-19 | `--export`/`--import` are session↔disk; cross-repo moves became `--publish`/`--consume`. | |

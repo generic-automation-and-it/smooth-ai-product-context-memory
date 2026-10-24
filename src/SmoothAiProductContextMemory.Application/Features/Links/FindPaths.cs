@@ -67,9 +67,17 @@ public static class FindPaths
                 .InclusiveBetween(1, MemoryTraversalDefaults.MaxDepth)
                 .WithMessage($"MaxDepth must be between 1 and {MemoryTraversalDefaults.MaxDepth}.");
             RuleFor(x => x.Relation).MaximumLength(32);
+            RuleFor(x => x.Relation).Must(value => value is null || !value.Contains('\0'))
+                .WithMessage("Relation must not contain a null character.");
             RuleFor(x => x.Kind).MaximumLength(64);
+            RuleFor(x => x.Kind).Must(value => value is null || !value.Contains('\0'))
+                .WithMessage("Kind must not contain a null character.");
             RuleFor(x => x.Status).MaximumLength(32);
+            RuleFor(x => x.Status).Must(value => value is null || !value.Contains('\0'))
+                .WithMessage("Status must not contain a null character.");
             RuleFor(x => x.ScopeDimension).MaximumLength(32);
+            RuleFor(x => x.ScopeDimension).Must(value => value is null || !value.Contains('\0'))
+                .WithMessage("ScopeDimension must not contain a null character.");
             RuleFor(x => x.Limit).InclusiveBetween(1, MemorySearchDefaults.MaxLimit);
             RuleFor(x => x.Direction)
                 .Must(direction => direction is null || DirectionValue.All.Contains(direction, StringComparer.Ordinal))

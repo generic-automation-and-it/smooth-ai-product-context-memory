@@ -3,8 +3,8 @@ WORKDIR /src
 COPY Directory.Build.props Directory.Packages.props ./
 COPY src/SmoothAiProductContextMemory.Knowledge/ src/SmoothAiProductContextMemory.Knowledge/
 COPY src/SmoothAiProductContextMemory.KnowledgeHost/ src/SmoothAiProductContextMemory.KnowledgeHost/
-COPY .agents/skills/mimisbrunnr-odin-context-memory/scripts/redact.py .agents/skills/mimisbrunnr-odin-context-memory/scripts/redact.py
-COPY .agents/skills/mimisbrunnr-odin-context-memory/scripts/atomicity.py .agents/skills/mimisbrunnr-odin-context-memory/scripts/atomicity.py
+COPY .agents/skills/_mimisbrunnr-shared/scripts/redact.py .agents/skills/_mimisbrunnr-shared/scripts/redact.py
+COPY .agents/skills/_mimisbrunnr-shared/scripts/atomicity.py .agents/skills/_mimisbrunnr-shared/scripts/atomicity.py
 RUN dotnet publish src/SmoothAiProductContextMemory.KnowledgeHost -c Release -o /app
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 ARG REVISION=unknown

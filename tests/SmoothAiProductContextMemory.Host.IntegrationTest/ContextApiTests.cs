@@ -1,4 +1,5 @@
 extern alias HostApp;
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 
 using System.Net;
 using System.Net.Http.Json;
@@ -15,10 +16,65 @@ namespace SmoothAiProductContextMemory.Host.IntegrationTest;
 
 public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<HostWebAppFixture>
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
     private readonly HttpClient _http = fixture.HttpClient;
     private readonly HostWebAppFixture _fixture = fixture;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(-5, false)]
+    public async Task Offset_timestamps_write_as_utc_instants(int offsetHours, bool hasEnd)
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        var start = new DateTimeOffset(2026, 10, 13, 16, 0, 0, TimeSpan.FromHours(offsetHours));
+        DateTimeOffset? end = hasEnd ? start.AddDays(1) : null;
+        string subject = $"Instant regression {Guid.NewGuid():N}";
+        JsonElement created = await SetMemory(group, subject, "Initial claim",
+            MemoryVersion.MemoryVersionStatus.Approved, validFrom: start, validUntil: end);
+        Guid uuid = created.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+        await SetMemory(group, subject, "Updated claim", MemoryVersion.MemoryVersionStatus.Approved,
+            uuid: uuid, validFrom: start.AddHours(1), validUntil: end?.AddHours(1));
+
+        using HttpResponseMessage response = await _http.GetAsync($"/api/context/memories/{uuid}/versions", Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
+        JsonElement[] versions = body.GetProperty("items").EnumerateArray().OrderBy(v => v.GetProperty("version").GetInt32()).ToArray();
+        versions.Length.ShouldBe(2);
+        for (int i = 0; i < versions.Length; i++)
+        {
+            versions[i].GetProperty("validFrom").GetDateTimeOffset().ShouldBe(start.AddHours(i));
+            versions[i].GetProperty("validFrom").GetString()!.ShouldEndWith("Z");
+            if (hasEnd)
+            {
+                versions[i].GetProperty("validUntil").GetDateTimeOffset().ShouldBe(end!.Value.AddHours(i));
+                versions[i].GetProperty("validUntil").GetString()!.ShouldEndWith("Z");
+            }
+            else versions[i].GetProperty("validUntil").ValueKind.ShouldBe(JsonValueKind.Null);
+        }
+    }
+
+    [Fact]
+    public async Task Date_only_query_timestamp_is_rejected()
+    {
+        using HttpResponseMessage response = await _http.GetAsync(
+            "/api/context/recall-feedback/never-recalled?asOf=2026-10-13", Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Timestamp_without_timezone_is_rejected_before_writing()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        JsonElement body = JsonSerializer.SerializeToElement(SetBody(group, "No timezone", "Claim",
+            MemoryVersion.MemoryVersionStatus.Approved));
+        string payload = body.GetRawText();
+        string original = body.GetProperty("items")[0].GetProperty("validFrom").GetString()!;
+        payload = payload.Replace(original, "2026-10-13T16:00:00", StringComparison.Ordinal);
+        using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+        using HttpResponseMessage response = await _http.PostAsync("/api/context/memories", content, Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
 
     [Fact]
     public async Task Empty_query_returns_200_empty_array()
@@ -59,10 +115,62 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await read.PostAsJsonAsync("/api/context/initiatives", new { }, Ct))
             .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-        (await read.GetAsync($"/api/context/recall-feedback/miss-rate?from={DateTimeOffset.UtcNow:yyyy-MM-dd}&to={DateTimeOffset.UtcNow:yyyy-MM-dd}", Ct))
+        (await read.PostAsJsonAsync("/api/context/product-names", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PutAsJsonAsync("/api/context/product-names/initiatives", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PostAsJsonAsync("/api/context/product-names/initiatives/unlink", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PutAsJsonAsync("/api/context/product-names/repos", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.GetAsync("/api/context/product-names", Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+        // Unknown product is a 404 on the query path and on this read route - never an empty OK.
+        (await read.GetAsync("/api/context/product-names/links?productName=x", Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await read.GetAsync($"/api/context/recall-feedback/miss-rate?from={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}&to={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}", Ct))
             .StatusCode.ShouldBe(HttpStatusCode.OK);
         (await read.PostAsJsonAsync("/api/context/recall-feedback/reset", new { }, Ct))
             .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Product_name_round_trip_through_http()
+    {
+        string suffix = Guid.NewGuid().ToString("N");
+        string product = $"prod-{suffix}";
+        string initiative = $"ini-{suffix}";
+
+        (await _http.PostAsJsonAsync("/api/context/initiatives", new { name = initiative }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await _http.PostAsJsonAsync("/api/context/product-names", new { name = product }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        using HttpResponseMessage link = await _http.PutAsJsonAsync(
+            "/api/context/product-names/initiatives",
+            new { productName = product, initiativeName = initiative, reason = "e2e" },
+            Ct);
+        link.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        using HttpResponseMessage links = await _http.GetAsync($"/api/context/product-names/links?productName={product}", Ct);
+        links.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement linksBody = await links.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
+        linksBody.GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("initiativeName").GetString())
+            .ShouldContain(initiative);
+
+        using HttpResponseMessage list = await _http.GetAsync("/api/context/product-names", Ct);
+        list.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await list.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("name").GetString())
+            .ShouldContain(product);
+
+        // An unregistered product is refused on linking.
+        using HttpResponseMessage refused = await _http.PutAsJsonAsync(
+            "/api/context/product-names/initiatives",
+            new { productName = "does-not-exist", initiativeName = initiative, reason = "no" },
+            Ct);
+        refused.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -75,6 +183,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             (HttpMethod.Post, "/api/context/preflight"),
             (HttpMethod.Post, "/api/context/memories"),
             (HttpMethod.Post, "/api/context/query"),
+            (HttpMethod.Get, $"/api/context/memories/{Guid.NewGuid()}"),
             (HttpMethod.Get, $"/api/context/memories/{Guid.NewGuid()}/versions"),
             (HttpMethod.Get, $"/api/context/memories/{Guid.NewGuid()}/versions/1/blob"),
             (HttpMethod.Post, "/api/context/groups/resolve"),
@@ -88,8 +197,14 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             (HttpMethod.Post, "/api/context/labels"),
             (HttpMethod.Get, "/api/context/initiatives"),
             (HttpMethod.Post, "/api/context/initiatives"),
-            (HttpMethod.Get, $"/api/context/recall-feedback/never-recalled?asOf={DateTimeOffset.UtcNow:yyyy-MM-dd}"),
-            (HttpMethod.Get, $"/api/context/recall-feedback/miss-rate?from={DateTimeOffset.UtcNow:yyyy-MM-dd}&to={DateTimeOffset.UtcNow:yyyy-MM-dd}"),
+            (HttpMethod.Get, "/api/context/product-names"),
+            (HttpMethod.Post, "/api/context/product-names"),
+            (HttpMethod.Put, "/api/context/product-names/initiatives"),
+            (HttpMethod.Post, "/api/context/product-names/initiatives/unlink"),
+            (HttpMethod.Put, "/api/context/product-names/repos"),
+            (HttpMethod.Get, "/api/context/product-names/links"),
+            (HttpMethod.Get, $"/api/context/recall-feedback/never-recalled?asOf={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}"),
+            (HttpMethod.Get, $"/api/context/recall-feedback/miss-rate?from={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}&to={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}"),
             (HttpMethod.Post, "/api/context/recall-feedback/reset"),
             (HttpMethod.Post, "/api/context/dossier/bundle"),
             (HttpMethod.Post, "/api/context/dossier/preview"),
@@ -200,6 +315,60 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
 
         using HttpResponseMessage allowed = await _http.GetAsync(
             $"/api/context/memories/{uuid}/versions?scope={MemoryGroup.ScopeDimensionValue.Program}",
+            Ct);
+        allowed.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// The graph hop label read: a traversal hands back uuid references for intermediate hops, so the
+    /// cheap current-version read by identity is what labels a node. It returns cheap fields only — no
+    /// blob — and it carries the scope rule, because a uuid in a path chain is not authority to read a
+    /// dimension the scope rule hides.
+    /// </summary>
+    [Fact]
+    public async Task Memory_read_by_identity_returns_the_current_version()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        JsonElement created = await SetMemory(
+            group,
+            "Identity read subject",
+            "Claim v1",
+            MemoryVersion.MemoryVersionStatus.Approved,
+            content: "identity-body");
+        Guid uuid = created.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+        await SetMemory(group, "Identity read subject", "Claim v2",
+            MemoryVersion.MemoryVersionStatus.Approved, uuid: uuid);
+
+        using HttpResponseMessage response = await _http.GetAsync($"/api/context/memories/{uuid}", Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement item = (await response.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("item");
+        item.GetProperty("uuid").GetGuid().ShouldBe(uuid);
+        item.GetProperty("version").GetInt32().ShouldBe(2);
+        item.GetProperty("statement").GetString().ShouldBe("Claim v2");
+        item.GetProperty("isCurrent").GetBoolean().ShouldBeTrue();
+        // Cheap fields only: the body is never carried by this read (NFR-05).
+        item.TryGetProperty("blobAddress", out _).ShouldBeFalse();
+
+        using HttpResponseMessage missing = await _http.GetAsync($"/api/context/memories/{Guid.NewGuid()}", Ct);
+        missing.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Program_memory_read_by_identity_needs_an_explicit_scope()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Program);
+        JsonElement created = await SetMemory(
+            group,
+            "Programme identity subject",
+            "Programme claim",
+            MemoryVersion.MemoryVersionStatus.Approved);
+        Guid uuid = created.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+
+        using HttpResponseMessage blocked = await _http.GetAsync($"/api/context/memories/{uuid}", Ct);
+        blocked.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        using HttpResponseMessage allowed = await _http.GetAsync(
+            $"/api/context/memories/{uuid}?scope={MemoryGroup.ScopeDimensionValue.Program}",
             Ct);
         allowed.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
@@ -619,9 +788,17 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         ["POST /api/context/labels"] = ApiCapability.Write,   // proposing a label writes a draft row
         ["GET /api/context/initiatives"] = ApiCapability.Read,
         ["POST /api/context/initiatives"] = ApiCapability.Write,
+        ["GET /api/context/product-names"] = ApiCapability.Read,
+        ["POST /api/context/product-names"] = ApiCapability.Write,
+        ["PUT /api/context/product-names/initiatives"] = ApiCapability.Write,
+        ["POST /api/context/product-names/initiatives/unlink"] = ApiCapability.Write,
+        ["PUT /api/context/product-names/repos"] = ApiCapability.Write,
+        ["GET /api/context/product-names/links"] = ApiCapability.Read,
         ["POST /api/context/query"] = ApiCapability.Read,
         ["POST /api/context/paths"] = ApiCapability.Read,
         ["POST /api/context/tickets/paths"] = ApiCapability.Read,
+        ["GET /api/context/memories/{uuid:guid}"] = ApiCapability.Read,
+        ["GET /api/context/capabilities"] = ApiCapability.Read,   // Console login: resolves read vs read+write (HLD-009)
         ["GET /api/context/memories/{uuid:guid}/versions"] = ApiCapability.Read,
         ["GET /api/context/memories/{uuid:guid}/versions/{version:int}/blob"] = ApiCapability.Read,
         ["POST /api/context/dossier/bundle"] = ApiCapability.Read,
@@ -637,6 +814,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         // Mutating: create, supersede, link, register, trigger, reset.
         ["POST /api/context/preflight"] = ApiCapability.Write,
         ["POST /api/context/memories"] = ApiCapability.Write,
+        ["POST /api/context/memories/ticket-references"] = ApiCapability.Write,
         ["POST /api/context/links"] = ApiCapability.Write,
         ["POST /api/context/groups/resolve"] = ApiCapability.Write,   // may create a group
         ["PATCH /api/context/groups/{uuid:guid}"] = ApiCapability.Write,
@@ -744,6 +922,11 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         string[] memoryProperties = [.. memoryWrite.GetProperty("properties").EnumerateObject().Select(m => m.Name)];
         memoryProperties.ShouldContain("uuid");
         memoryProperties.ShouldContain("createUuid");
+        JsonElement validFrom = memoryWrite.GetProperty("properties").GetProperty("validFrom");
+        if (validFrom.TryGetProperty("$ref", out JsonElement reference))
+            validFrom = schemas.GetProperty(reference.GetString()!.Split('/').Last());
+        validFrom.GetProperty("type").GetString().ShouldBe("string");
+        validFrom.GetProperty("format").GetString().ShouldBe("date-time");
     }
 
     [Fact]
@@ -768,7 +951,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         // RecentlyCapturedGraceDays), and both memories above were captured now. Asking as of a date
         // past that window is what puts them in scope — with asOf=today every assertion below passes
         // vacuously, because the grace filter alone removes them whether or not a feedback row exists.
-        string asOf = $"{DateTimeOffset.UtcNow.AddDays(8):yyyy-MM-dd}";
+        string asOf = WebUtility.UrlEncode(DateTimeOffset.UtcNow.AddDays(8).ToString("O"));
         using HttpResponseMessage never = await _http.GetAsync(
             $"/api/context/recall-feedback/never-recalled?asOf={asOf}&limit=500", Ct);
         never.StatusCode.ShouldBe(HttpStatusCode.OK);

@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation.TestHelper;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.Memories;
@@ -17,7 +18,7 @@ public class SetMemoriesValidatorTests
     public void Document_approval_uses_the_explicit_shape_one_evidence_contract(string category, int shape, bool accepted)
     {
         var evidence = new EvidenceDocument { V = shape, Category = category };
-        var item = new SetMemories.MemoryWrite(null, "Document approval", "Design document", "The design document is approved.", "Document approval", "decision", null, null, "proposed", 50, "Synthetic source", [new SourceInput("conversation", "synthetic://document-approval", null, evidence)], DateTimeOffset.UtcNow, null, null, null);
+        var item = new SetMemories.MemoryWrite(null, "Document approval", "Design document", "The design document is approved.", "Document approval", "decision", null, null, "proposed", 50, "Synthetic source", [new SourceInput("conversation", "synthetic://document-approval", null, evidence)], SystemClock.Instance.GetCurrentInstant(), null, null, null);
         var result = _validator.TestValidate(new SetMemories.Request(Guid.NewGuid(), [item], null, null, DryRun: true));
         if (accepted) result.ShouldNotHaveAnyValidationErrors();
         else result.ShouldHaveValidationErrorFor("Items[0].Sources[0].Evidence");
@@ -42,7 +43,7 @@ public class SetMemoriesValidatorTests
                     200,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)
@@ -72,11 +73,11 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)
@@ -100,7 +101,7 @@ public class SetMemoriesValidatorTests
     [Fact]
     public void Rejects_overlong_relation_and_inverted_validity()
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Instant now = SystemClock.Instance.GetCurrentInstant();
         var request = new SetMemories.Request(
             Guid.NewGuid(),
             [
@@ -113,12 +114,12 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
                     now,
-                    now.AddDays(-1),
+                    now.Plus(Duration.FromDays(-1)),
                     null,
                     null)
             ],
@@ -145,11 +146,11 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     ["architecture"],
                     ["tag"],
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     "body",
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     "model",
                     "v1")
@@ -175,11 +176,11 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)
@@ -205,11 +206,11 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)
@@ -261,6 +262,40 @@ public class SetMemoriesValidatorTests
             .ShouldNotHaveAnyValidationErrors();
     }
 
+    /// <summary>LADR-11: `approved` is a Status value like any other; a fresh approved create is the
+    /// capture path's normal shape (set_items defaults status=approved on a create). The validator does
+    /// not special-case it — the proposed->approved transition is a version-bump, not a validator rule.</summary>
+    [Fact]
+    public void Accepts_approved_create_without_uuid()
+    {
+        SetMemories.Request request = ValidRequest() with
+        {
+            Items = [ValidRequest().Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+                Uuid = null,
+            }],
+        };
+
+        _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
+    }
+
+    [Fact]
+    public void Accepts_approved_version_bump_with_uuid()
+    {
+        SetMemories.Request request = ValidRequest() with
+        {
+            Items = [ValidRequest().Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+                Uuid = Guid.NewGuid(),
+                CreateUuid = null,
+            }],
+        };
+
+        _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
+    }
+
     private static SetMemories.Request ValidRequest() =>
         new(
             Guid.NewGuid(),
@@ -274,11 +309,11 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)

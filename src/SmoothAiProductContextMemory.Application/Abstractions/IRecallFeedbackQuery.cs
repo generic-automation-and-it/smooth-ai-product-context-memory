@@ -1,13 +1,14 @@
+using NodaTime;
 namespace SmoothAiProductContextMemory.Application.Abstractions;
 
 /// <summary>As-of point and record cap for the never-recalled list.</summary>
-public sealed record NeverRecalledRequest(DateTimeOffset AsOf, int? Limit = 500, string? RecallPurpose = null);
+public sealed record NeverRecalledRequest(Instant AsOf, int? Limit = 500, string? RecallPurpose = null);
 
 /// <summary>A memory that has never been recalled, with its capture age.</summary>
-public sealed record NeverRecalledRow(Guid MemoryUuid, DateTimeOffset CapturedOn);
+public sealed record NeverRecalledRow(Guid MemoryUuid, Instant CapturedOn);
 
 /// <summary>Miss-rate window.</summary>
-public sealed record MissRateRequest(DateTimeOffset From, DateTimeOffset To, string? RecallPurpose = null);
+public sealed record MissRateRequest(Instant From, Instant To, string? RecallPurpose = null);
 
 public sealed record MissRateResult(int Retrievals, int Misses, double MissRate,
     int CallerRequests = 0, int CallerMisses = 0, double CallerMissRate = 0);

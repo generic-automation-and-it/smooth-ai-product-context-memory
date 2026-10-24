@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -12,8 +13,8 @@ namespace SmoothAiProductContextMemory.Application.ComponentTest.Features;
 
 public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestBase(aspire)
 {
-    private static readonly DateTimeOffset ValidFrom = new(2024, 3, 1, 12, 0, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset CreatedOn = new(2024, 3, 2, 9, 0, 0, TimeSpan.Zero);
+    private static readonly Instant ValidFrom = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 1, 12, 0, 0, TimeSpan.Zero));
+    private static readonly Instant CreatedOn = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 2, 9, 0, 0, TimeSpan.Zero));
     private static readonly Guid ProductGroupUuid = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid ProgramGroupUuid = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid SelfGroupUuid = Guid.Parse("33333333-3333-3333-3333-333333333333");

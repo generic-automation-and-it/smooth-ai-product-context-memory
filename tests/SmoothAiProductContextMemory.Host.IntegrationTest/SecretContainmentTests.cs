@@ -1,3 +1,4 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -16,7 +17,7 @@ namespace SmoothAiProductContextMemory.Host.IntegrationTest;
 public sealed class SecretContainmentTests(SecretContainmentWebAppFixture fixture)
     : IClassFixture<SecretContainmentWebAppFixture>
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
     private readonly HttpClient _http = fixture.HttpClient;
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;

@@ -19,15 +19,14 @@ on:
       - scripts/**
       - npm/**
       - package.json
-      - .agents/skills/mimisbrunnr-odin-context-memory/**
-      - .agents/skills/mimisbrunnr-kvasir-understanding/**
-      - .agents/skills/mimisbrunnr-saga-dossier/**
+      - .agents/skills/_mimisbrunnr-shared/**
+      # One glob, not a line per skill: the next `mimisbrunnr-*` is covered by the shape
+      # of the filter instead of by a remembered edit. `test_check_skill_selfcontainment`
+      # asserts every owned skill is reachable from here, so this cannot go stale silently.
+      - .agents/skills/mimisbrunnr-*/**
+      - .agents/skills/ai-brain-dump/**
+      - .agents/skills/ai-memory-context/**
       - .agents/skills/ai-understanding/**
-      - .agents/skills/mimisbrunnr-muninn-recall-feedback/**
-      - .agents/skills/mimisbrunnr-ymir-bootstrap/**
-      - .agents/skills/agile-github-*/**
-      - .agents/agents/memory-read.md
-      - .agents/agents/memory-write.md
       - .github/actions/**
       - .github/scripts/**
       - .github/workflows/pr-gate.yml
@@ -50,15 +49,14 @@ on:
       - scripts/**
       - npm/**
       - package.json
-      - .agents/skills/mimisbrunnr-odin-context-memory/**
-      - .agents/skills/mimisbrunnr-kvasir-understanding/**
-      - .agents/skills/mimisbrunnr-saga-dossier/**
+      - .agents/skills/_mimisbrunnr-shared/**
+      # One glob, not a line per skill: the next `mimisbrunnr-*` is covered by the shape
+      # of the filter instead of by a remembered edit. `test_check_skill_selfcontainment`
+      # asserts every owned skill is reachable from here, so this cannot go stale silently.
+      - .agents/skills/mimisbrunnr-*/**
+      - .agents/skills/ai-brain-dump/**
+      - .agents/skills/ai-memory-context/**
       - .agents/skills/ai-understanding/**
-      - .agents/skills/mimisbrunnr-muninn-recall-feedback/**
-      - .agents/skills/mimisbrunnr-ymir-bootstrap/**
-      - .agents/skills/agile-github-*/**
-      - .agents/agents/memory-read.md
-      - .agents/agents/memory-write.md
       - .github/actions/**
       - .github/scripts/**
       - .github/workflows/pr-gate.yml
@@ -103,6 +101,8 @@ jobs:
         run: |
           python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py
           python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/measure_cost.py
+          python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/test_decisions_gate.py
+          python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/test_review_and_dedup.py
 
       - name: Test understanding skill
         run: |
@@ -112,16 +112,71 @@ jobs:
       - name: Test dossier skill
         run: python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py
 
+      # The local-first memory store. `parity_shared_scripts.py` is load-bearing rather than
+      # ceremonial: the three vendored scripts are duplicated so the skill ships as one zip, and
+      # that duplication is only safe while both sides are equal.
+      - name: Test ai-memory-context skill
+        run: |
+          python3 -B .agents/skills/ai-memory-context/tests/run_tests.py
+          python3 -B .agents/skills/ai-memory-context/tests/parity_shared_scripts.py
+
       - name: Test ai-understanding skill
-        run: python3 -B .agents/skills/ai-understanding/tests/run_tests.py
+        run: |
+          python3 -B .agents/skills/ai-understanding/tests/run_tests.py
+          python3 -B .agents/skills/ai-understanding/tests/parity_decisions_gate.py
+          python3 -B .agents/skills/ai-understanding/tests/gate_behavior.py
 
       - name: Test recall-feedback skill
         run: python3 -B .agents/skills/mimisbrunnr-muninn-recall-feedback/tests/run_tests.py
 
-      - name: Test agile GitHub skills
+      - name: Test session-metadata skill
+        run: python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/tests/run_tests.py
+
+      # HLD-010 NFR-01: zero peer-skill path references in shipped skill scripts. Inside the plugin
+      # the only legitimate shared-code target is `_mimisbrunnr-shared/scripts/`; across a plugin
+      # boundary a copy is a file, never a reference. A reintroduced peer path fails here the day it
+      # lands, rather than surfacing at runtime on a consumer's least-tested path.
+      - name: Check no peer-skill script reach (HLD-010 NFR-01)
         run: |
-          python3 -B .agents/skills/agile-github-breakdown/scripts/test_skill_scripts.py
-          python3 -B .agents/skills/agile-github-task-from-diff/scripts/test_create_github_task_from_diff.py
+          set -uo pipefail
+          peers='mimisbrunnr-(odin-context-memory|kvasir-understanding|saga-dossier|heimdallr-find-session-metadata|ymir-bootstrap|vitsmunir-dump|muninn-recall-feedback)/scripts/'
+          hits="$(grep -rnE "parents\[2\] */ *\"mimisbrunnr-|${peers}" .agents/skills/*/scripts --include='*.py' --include='*.sh' || true)"
+          if [ -n "$hits" ]; then
+            echo "::error::HLD-010 NFR-01 — a shipped skill script reaches into a peer skill's folder"
+            printf '%s\n' "$hits"
+            exit 1
+          fi
+          echo "no peer-skill script reach (HLD-010 NFR-01)"
+
+      # HLD-010 NFR-05: the installer-owned skills are copied verbatim into other repositories, where
+      # this repository's docs/, rules and workflows do not exist. Outside table rows (changelog and
+      # history), a link may not resolve outside .agents/skills and a rule may not be cited by its
+      # repo-relative path — both become dead references in every vendoring repository.
+      - name: Check vendored skills are self-contained (HLD-010 NFR-05)
+        run: |
+          python3 scripts/check_vendored_skills.py
+          python3 -B -m unittest discover -s scripts -p 'test_check_vendored_skills.py' -v
+
+      # A separate question from the one above, and deliberately not folded into it. NFR-05 is "does
+      # this skill reach into *this repository's* tree"; this is "does this skill reach outside *itself*",
+      # which is what decides whether it can ship as a zip on its own. Two mechanisms, and the second
+      # is the one that bites: a runtime path resolution, and a command the SKILL.md documents. Odin has
+      # no shared import anywhere in its own scripts and is still broken alone, because its SKILL.md
+      # tells the agent to shell out to a sibling. A declared dependency is fine — failing on an
+      # *undeclared* one is the point.
+      - name: Check skill self-containment is declared
+        run: |
+          python3 scripts/check_skill_selfcontainment.py
+          python3 -B -m unittest discover -s scripts -p 'test_check_skill_selfcontainment.py' -v
+
+      # Two more harnesses for scripts/ that had none. `pack-skill-zip.py` produces the artifact a
+      # desktop runtime loads, and it shipped a zip containing a bogus empty directory entry while
+      # reporting itself fit to upload. `test_store_layout_parity.py` holds the store-layout contract
+      # equal across the two indexers that implement it, which is the property LADR-002 rests on.
+      - name: Test the skill zip packer and the store-layout parity
+        run: |
+          python3 -B scripts/test_pack_skill_zip.py
+          python3 -B scripts/test_store_layout_parity.py
 
       # Without --postgres only the Docker-free transport checks run; the disposable-container
       # fixture stays an operator-run check (scripts/AGENTS.md).
@@ -170,6 +225,12 @@ jobs:
 
       - name: Test controller launcher
         run: bash scripts/test-run-launcher.sh
+
+      # install-skills.ps1 is skipped here: pwsh 7 is not on the runner image, and the harness says so
+      # rather than passing quietly. It is exercised locally on macOS/Linux with pwsh present, and the
+      # PowerShell-only formatting and ConvertFrom-Json paths are the part a green Linux run cannot cover.
+      - name: Test skills installer
+        run: bash scripts/test-install-skills.sh
 
       - name: Test Aspire test runner
         run: bash .github/actions/aspire-test-with-coverage/test-run.sh
@@ -243,6 +304,7 @@ jobs:
       DOCKER_BUILD_RECORD_UPLOAD: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       LOCAL_API_IMAGE: localhost:5000/smooth-ai-product-context-memory
       LOCAL_APPHOST_IMAGE: localhost:5000/smooth-ai-product-context-memory-apphost
+      LOCAL_VIEWER_IMAGE: localhost:5000/smooth-ai-product-context-memory-viewer
 
     steps:
       - name: Checkout
@@ -272,6 +334,22 @@ jobs:
           cache-from: type=gha,scope=pr-api-${{ github.ref }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=pr-api-${{ github.ref }}-${{ matrix.arch }}
 
+      - name: Build Viewer image
+        id: viewer
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./src/SmoothAiProductContextMemory.Viewer/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          tags: ${{ env.LOCAL_VIEWER_IMAGE }}:pr
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=pr-viewer-${{ github.ref }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=pr-viewer-${{ github.ref }}-${{ matrix.arch }}
+
       - name: Build AppHost controller image
         id: apphost
         uses: docker/build-push-action@v6
@@ -285,6 +363,8 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             API_IMAGE=${{ env.LOCAL_API_IMAGE }}@${{ steps.api.outputs.digest }}
+            VIEWER_IMAGE=${{ env.LOCAL_VIEWER_IMAGE }}@${{ steps.viewer.outputs.digest }}
+            VIEWER_ENABLED=true
             RELEASE_VERSION=pr-${{ github.event.pull_request.number || github.run_number }}
             REVISION=${{ github.sha }}
           cache-from: type=gha,scope=pr-apphost-${{ github.ref }}-${{ matrix.arch }}
@@ -298,6 +378,7 @@ jobs:
           INSTALLATION_ID: pr-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
           API_DIGEST: ${{ steps.api.outputs.digest }}
           APPHOST_DIGEST: ${{ steps.apphost.outputs.digest }}
+          VIEWER_DIGEST: ${{ steps.viewer.outputs.digest }}
         run: |
           set -euo pipefail
           case "$ARCH:$(uname -m)" in
@@ -307,4 +388,6 @@ jobs:
           docker pull --platform "linux/$ARCH" "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}"
           docker image inspect "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}" |
             jq -e --arg api "HostConfiguration__Image=${LOCAL_API_IMAGE}@${API_DIGEST}" '.[0].Config.Env | index($api) != null'
+          docker image inspect "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}" |
+            jq -e --arg viewer "ViewerConfiguration__Image=${LOCAL_VIEWER_IMAGE}@${VIEWER_DIGEST}" '.[0].Config.Env | index($viewer) != null'
           scripts/smoke-apphost-container.sh "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}"

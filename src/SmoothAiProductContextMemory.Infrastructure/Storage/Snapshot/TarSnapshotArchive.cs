@@ -1,9 +1,11 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Formats.Tar;
 using System.Text;
 using System.Text.Json;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 using SmoothAiProductContextMemory.Domain.Entities;
+using SmoothAiProductContextMemory.Domain;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 
@@ -17,7 +19,7 @@ namespace SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 /// </summary>
 public sealed class TarSnapshotArchive : ISnapshotArchive
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
 
     public async Task<SnapshotWriteReport> WriteAsync(
         string destinationPath,
@@ -52,7 +54,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                         DataStream = new MemoryStream(content, writable: false),
                     },
                     cancellationToken);
-                entries.Add(new SnapshotArchiveEntry(name, sha256 ?? Sha256ContentAddress.Hash(content), content.Length, contentType));
+                entries.Add(new SnapshotArchiveEntry(name, sha256 ?? ContentAddress.Hash(content), content.Length, contentType));
             };
 
             await writeEntry(SnapshotEntryNames.Initiatives, Serialize(capture.Initiatives));
@@ -65,6 +67,12 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             await writeEntry(SnapshotEntryNames.Edges, Serialize(capture.Edges));
             await writeEntry(SnapshotEntryNames.TicketVertices, Serialize(capture.TicketVertices));
             await writeEntry(SnapshotEntryNames.TicketEdges, Serialize(capture.TicketEdges));
+            await writeEntry(SnapshotEntryNames.AboutEdges, Serialize(capture.AboutEdges));
+            await writeEntry(SnapshotEntryNames.ProductVertices, Serialize(capture.ProductVertices));
+            await writeEntry(SnapshotEntryNames.InitiativeVertices, Serialize(capture.InitiativeVertices));
+            await writeEntry(SnapshotEntryNames.RepoVertices, Serialize(capture.RepoVertices));
+            await writeEntry(SnapshotEntryNames.ProductInitiativeEdges, Serialize(capture.ProductInitiativeEdges));
+            await writeEntry(SnapshotEntryNames.ProductRepoEdges, Serialize(capture.ProductRepoEdges));
             await writeEntry(SnapshotEntryNames.OperationReceipts, Serialize(capture.OperationReceipts ?? []));
 
             int objects = 0;
@@ -102,7 +110,14 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 objects,
                 capture.TicketVertices.Count,
                 capture.TicketEdges.Count,
+                capture.AboutEdges.Count,
+                capture.ProductVertices.Count,
+                capture.InitiativeVertices.Count,
+                capture.RepoVertices.Count,
+                capture.ProductInitiativeEdges.Count,
+                capture.ProductRepoEdges.Count,
                 capture.OperationReceipts?.Count ?? 0);
+
 
             var exclusions = new SnapshotExclusions(["recall_feedback", "corpus_state"]);
 
@@ -311,14 +326,14 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 continue;
             }
 
-            if (!string.Equals(Sha256ContentAddress.Hash(content), expected.Sha256, StringComparison.Ordinal))
+            if (!string.Equals(ContentAddress.Hash(content), expected.Sha256, StringComparison.Ordinal))
             {
                 findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, expected.Name,
                     "Entry content hash does not match the manifest."));
             }
 
             if (TryBlobAddress(expected.Name, out string? address)
-                && !string.Equals(Sha256ContentAddress.Compute(content), address, StringComparison.Ordinal))
+                && !string.Equals(ContentAddress.Compute(content), address, StringComparison.Ordinal))
             {
                 findings.Add(new SnapshotFinding(SnapshotFindingKind.CaptureTimeInconsistency, expected.Name,
                     "Blob content hash disagrees with the database-cited address (capture-time cross-store inconsistency)."));
@@ -336,13 +351,13 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         }
 
         ReconcileCounts(manifest, entries, findings);
-        if (manifest.FormatVersion == 3 && (manifest.Counts.OperationReceipts != 0 || entries.ContainsKey(SnapshotEntryNames.OperationReceipts)))
+        if (manifest.FormatVersion == 5 && (manifest.Counts.OperationReceipts != 0 || entries.ContainsKey(SnapshotEntryNames.OperationReceipts)))
         {
             findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.OperationReceipts,
                 "Legacy archive format cannot declare operation receipts."));
         }
 
-        if (manifest.FormatVersion >= 4)
+        if (manifest.FormatVersion >= 6)
         {
             CheckCount(entries, SnapshotEntryNames.OperationReceipts, manifest.Counts.OperationReceipts, "operation receipt", findings);
             ValidateReceipts(entries, findings);
@@ -404,7 +419,13 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             Deserialize<SnapshotEdge[]>(Require(entries, SnapshotEntryNames.Edges)),
             Deserialize<SnapshotTicketVertex[]>(Require(entries, SnapshotEntryNames.TicketVertices)),
             Deserialize<SnapshotTicketEdge[]>(Require(entries, SnapshotEntryNames.TicketEdges)),
-            formatVersion >= 4 ? Deserialize<OperationReceipt[]>(Require(entries, SnapshotEntryNames.OperationReceipts)) : []);
+            Deserialize<SnapshotAboutEdge[]>(Require(entries, SnapshotEntryNames.AboutEdges)),
+            Deserialize<SnapshotProductVertex[]>(Require(entries, SnapshotEntryNames.ProductVertices)),
+            Deserialize<SnapshotNamedVertex[]>(Require(entries, SnapshotEntryNames.InitiativeVertices)),
+            Deserialize<SnapshotNamedVertex[]>(Require(entries, SnapshotEntryNames.RepoVertices)),
+            Deserialize<SnapshotProductInitiativeEdge[]>(Require(entries, SnapshotEntryNames.ProductInitiativeEdges)),
+            Deserialize<SnapshotProductRepoEdge[]>(Require(entries, SnapshotEntryNames.ProductRepoEdges)),
+            formatVersion >= 6 ? Deserialize<OperationReceipt[]>(Require(entries, SnapshotEntryNames.OperationReceipts)) : []);
 
     private static SnapshotManifest ReadAndGateManifest(IReadOnlyDictionary<string, byte[]> entries)
     {
@@ -441,6 +462,12 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         CheckCount(entries, SnapshotEntryNames.Edges, manifest.Counts.Edges, "graph edge", findings);
         CheckCount(entries, SnapshotEntryNames.TicketVertices, manifest.Counts.TicketVertices, "ticket vertex", findings);
         CheckCount(entries, SnapshotEntryNames.TicketEdges, manifest.Counts.TicketEdges, "ticket edge", findings);
+        CheckCount(entries, SnapshotEntryNames.AboutEdges, manifest.Counts.AboutEdges, "about edge", findings);
+        CheckCount(entries, SnapshotEntryNames.ProductVertices, manifest.Counts.ProductVertices, "product vertex", findings);
+        CheckCount(entries, SnapshotEntryNames.InitiativeVertices, manifest.Counts.InitiativeVertices, "initiative vertex", findings);
+        CheckCount(entries, SnapshotEntryNames.RepoVertices, manifest.Counts.RepoVertices, "repo vertex", findings);
+        CheckCount(entries, SnapshotEntryNames.ProductInitiativeEdges, manifest.Counts.ProductInitiativeEdges, "product initiative edge", findings);
+        CheckCount(entries, SnapshotEntryNames.ProductRepoEdges, manifest.Counts.ProductRepoEdges, "product repo edge", findings);
 
         int objects = 0;
         foreach (string name in entries.Keys)

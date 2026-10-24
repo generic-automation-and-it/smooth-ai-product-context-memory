@@ -38,6 +38,15 @@ Implemented October 3, 2026: existing memory and group-resolution requests accep
 - **Every traversal is bounded, and the bound is on the wire.** `POST /api/context/paths` requires `maxDepth`
   (1–5); there is no server-side default, because a default is a bound the caller never considered. The store
   layer refuses an out-of-range depth as well, so a direct caller cannot bypass the validator (HLD-003 LADR-07).
+- **Traversal input is never executed verbatim against the graph engine.** A caller supplies structure —
+  depth, direction, bounds, identities — never Cypher or any query expression. Any future expression-input
+  feature needs an explicit opt-in *and* a server-side flag, off by default: a readable-but-writable query
+  language turns read access into write access. The negative test pins that no traversal request exposes a
+  raw query/expression field (`NoVerbatimTraversalPolicyTests`), so adding one is a deliberate, reviewed change.
+- **A hop is a uuid, so a read by identity is part of the traversal surface.** `GetMemory` returns one
+  memory's current cheap fields by uuid; without it an intermediate hop has no endpoint a caller could
+  label. It is a by-identity read like blob and version history (not a search), so it does not go through
+  `IMemorySearch` — but it carries the same scope gate, and it never returns a body.
 - **The traversal endpoint is scope-gated at every vertex, not just the two ends.** Traversing *from* a
   programme-scoped memory needs `scopeDimension`, as the blob proxy and version history do (403 otherwise).
   The endpoints it *reaches* are narrowed by `Plan().RequiredDimension`; every intermediate hop it crosses
@@ -86,7 +95,7 @@ sequenceDiagram
     else write
         Handler->>Blob: StoreAsync (before tx)
         Handler->>Db: tx flip is_current, insert memories, then AGE links
-        Handler-->>Skill: digest with uuid + blobAddress
+        Handler-->>Skill: digest with uuid + blobAddress (created/versioned/unchanged)
     end
     Skill->>Host: POST /api/context/query
     Host->>Handler: QueryMemories
@@ -162,16 +171,34 @@ sequenceDiagram
 
 ## Key Behaviors
 
+- **`product-name` is a graph registry, not the `product` scope.** `POST /product-names` upserts,
+  `PUT /product-names/initiatives` and `PUT /product-names/repos` link, `POST .../initiatives/unlink`
+  removes, `GET /product-names` lists, `GET /product-names/links` reads one hop. `/query productName`
+  resolves through the graph (unknown product → 404) and applies the affinity as one OR predicate
+  (`initiative IN (...) OR repo IN (...)`) in SQL before the row ceiling; items carry `productMatch`
+  (`initiative`/`repo`) and `sharedInitiative`. SetMemories links a declared `ProductName` to the
+  group's initiative in the same transaction. Scope dimension `product` is untouched.
 - Retrieval defaults to **current-only** and **excludes `proposed`**. History is `GET .../versions`. Empty query is `200 []`. `limit` defaults to 50 and is capped at 200 — an uncapped read floods the caller's context.
 - A `set` request accepts at most 200 items; larger batches are a `400` — the write-side sibling of the read `limit` cap.
 - A `set` request accepts at most 400 links, and each link reason is capped at 4000 characters; larger values are a `400` on dry-run and write.
 - `asOf` narrows to claims valid at a business-time instant. Absent means no temporal narrowing.
-- API digest is a persist receipt: `created` / `versioned` / `linked` / `diverged` / `skipped` / `labelsProposed`; `diverged` is a mechanical count of newly created divergence-kind records. Skill composes the human digest.
+- API digest is a persist receipt: `created` / `versioned` / `unchanged` / `linked` / `diverged` / `skipped` / `labelsProposed`; `diverged` is a mechanical count of newly created divergence-kind records. Skill composes the human digest.
 - API persists `status` as given — no re-gate by kind.
 - **Subject uniqueness is checked before the write, not only by the index.** A create whose `subject_slug` already exists in the group is a `409` telling the caller to send a version bump — on the dry run too. Two items in one batch sharing a subject is the same `409`.
 - **Repeated version targets are ordered, not rejected.** They support BR-10 authority resolution in one
   transaction: an existing winner can retain the incoming loser as an intermediate historical version,
   then become current again. Planned version numbers and persistence order must remain identical.
+- **An identical version is a no-op.** Re-sending the current claim — same statement, summary, kind,
+  status, confidence, sources, valid-until and content address — plans `ItemMode.Unchanged`: no row, no
+  blob upload, no `is_current` flip, and the receipt reports `unchanged`. The comparer is `MemoryClaim`
+  (Application), D1: `ValidFrom` and `SummaryStamp` are deliberately outside the claim because kvasir
+  restamps `validFrom` each run, so a re-export on a later day still writes nothing. Accepted costs,
+  recorded with D1: a `ValidFrom`-only correction can no longer be a version; a version item differing
+  only in name/description/tags/facets reports `Unchanged` (those were already ignored on a version, so
+  the report is now honest). Accepted concurrency: the plan reads the current version before the
+  transaction, so a concurrent bump between plan and commit is not detected for an unchanged item — the
+  caller's claim equals the version it saw, and the other writer's version stands. A status change or any
+  single claim-field change is a real version.
 - **A version target is group-scoped; a link endpoint is deliberately not.** `MemoryWrite.Uuid` is resolved
   against the request's group, so another group's memory is a `404` — cross-group subject matches are
   written as a new memory here, never as a version bump. `externalUuids` are intentionally corpus-wide so
@@ -233,6 +260,12 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-16 | `QueryMemories.Request` gained `Inspect` (read-only): returns the evidence set the read path resolved (traversal anchors, scope plan, tsquery lexemes, facet/tag predicates, matched count) instead of rows, never records recall feedback, and never skips scope enforcement. `IMemorySearch.InspectAsync` + `MemorySearchInspection` added; `NpgsqlMemorySearch.InspectAsync` grounds the count by reusing `SearchAsync`. | cognee adoption part A |
+| 2026-10-16 | No-verbatim-traversal Non-Negotiable added: traversal input is never executed verbatim against the graph engine; a future expression-input feature needs an explicit opt-in plus a default-off server flag. Pinned by `NoVerbatimTraversalPolicyTests`. | cognee adoption part B |
+| 2026-10-16 | `QueryMemories` with a ticket now returns the **union** of the ticket's owner group and the memories carrying an `ABOUT` reference to it, each item marked `ticketMatch` (`owner`/`reference`). The reference branch carries the non-group-context scope plan (D2: a ticket grants no consent), every other filter stays AND-ed over the union, and the limit is applied after the union in SQL. `MemorySearchCriteria` gained `ReferencedUuids` (disjunctive, distinct from the conjunctive `UuidFilter`) and the reference-branch scope fields; `IMemoryGraph` gained `ListAboutAsync`. | HLD-003 LADR-09 |
+| 2026-10-15 | Added `Memories/GetMemory` — the cheap fields of a memory's **current** version, read by identity (`uuid` + optional `scopeDimension`, `NotFoundException` on an unknown uuid). It exists because a traversal returns uuid references for every intermediate hop and no other read can address a uuid: `POST /query` has no uuid predicate and `GET .../versions` returns the whole chain. It stays a *cheap* read (no blob, no version history) and carries the same scope rule as the blob and version-history proxies — a uuid in a path chain is not authority to read a dimension the scope rule hides. Its consumer is the Console graph's click-to-label hop read (HLD-009 P3). | HLD-009 P3 |
+| 2026-10-14 | `SetMemories` now compares an incoming version target's claim against the claim it would follow; an identical re-send plans `ItemMode.Unchanged` and writes no row (D1: `ValidFrom`/`SummaryStamp` outside the claim; `MemoryClaim` comparer). `Response`/`ItemResult` gained `unchanged`; `IBlobStorage`'s content address documented as `ContentAddress.Compute`. | version-bug |
+| 2026-10-13 | Memory validity, provenance, capture, recall-feedback and snapshot times are `Instant` values. `InstantJson` accepts ISO-8601 Z/explicit-offset inputs, converts immediately to absolute instants, emits canonical UTC Z, and rejects date-only/unzoned values. JSONB, snapshots and traversal deserialization share it. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-10-03 | Documented optional knowledge-service commit, evidence, and recovery support implemented in this branch. | optional knowledge service |
 | 2026-09-28 | **Corrected the preflight description this file added earlier the same day.** The rows below described preflight's group-unfiltered subject query as an *outstanding half* that "should carry the same group filter", and called the preflight/`SetMemories` disagreement a live seam. Both claims are wrong, and the first was an instruction to break something. `Preflight` judges nothing — it returns `Match` rows carrying both `Uuid` and `GroupUuid`, so the caller holds everything needed to classify; the only site that emits a `version_bump` target is the skill's semantic-dedup Judge, which already qualifies it by the request's `groupUuid`. The asymmetric recall is therefore the **design**: a same-subject memory in another group is what the caller needs to see in order to link the twin, and the group constraint lives on the versioning target, one step downstream. Group-filtering the subject query would remove cross-group link derivation and push that work onto `/query` for no correctness gain. Residual risk is a model misjudging group membership, and that fails safe — `BuildPlanAsync` throws before `PersistAsync`, so the batch aborts with no blob and no row touched, and `--dryrun` is the pre-write veto. Both bullets now carry a do-not-narrow it clause for the same reason the skill's stage-3 wording does. No behaviour changed. | PR #135 |
 | 2026-09-28 | Memory identity **decided: group-scoped**, making the shipped code authoritative over HLD-002 rather than the reverse. Goal 2, LADR-01 and LADR-04 are amended to state `(group, uuid)` identity, and NFR-02's cross-group evidence is **withdrawn** (unproducible by the shipped path) with its status line saying so. The accepted cost is recorded: a cross-group duplicate is invisible to the store. **Still open and now the operationally significant half:** `Preflight` matches subjects across all groups while `SetMemories` refuses a cross-group uuid, so the pre-write veto point can recommend a versioning candidate the write then `404`s. No behaviour changed. | HLD-002 LADR-01, LADR-04, NFR-02 |

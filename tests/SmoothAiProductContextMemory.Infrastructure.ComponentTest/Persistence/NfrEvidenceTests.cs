@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -68,7 +69,7 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
         new(DataSource, Loggers.CreateLogger<NpgsqlRecallFeedbackQuery>());
 
     private QueryMemories.Handler Handler(IRecallFeedback feedback) =>
-        new(Db, Search, feedback, Loggers.CreateLogger<QueryMemories.Handler>());
+        new(Db, Search, feedback, new NpgsqlProductGraph(Db), new NpgsqlMemoryGraph(Db), Loggers.CreateLogger<QueryMemories.Handler>());
 
     private static QueryMemories.Request Req(string? query, int limit) => new(
         Query: query,
@@ -211,7 +212,7 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
                 """,
                 conn);
             cmd.Parameters.AddWithValue("r", Guid.NewGuid());
-            cmd.Parameters.AddWithValue("o", DateTimeOffset.UtcNow);
+            cmd.Parameters.AddWithValue("o", SystemClock.Instance.GetCurrentInstant());
             await cmd.ExecuteNonQueryAsync(Ct);
             return false;
         }
@@ -323,7 +324,8 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
             // each own a context and a search, because a DbContext is not safe to share across threads.
             await using SmoothAiProductContextMemoryDbContext workerDb = NewDbContext();
             QueryMemories.Handler h = new(
-                workerDb, new NpgsqlMemorySearch(workerDb), Writer,
+                workerDb, new NpgsqlMemorySearch(workerDb), Writer, new NpgsqlProductGraph(workerDb),
+                new NpgsqlMemoryGraph(workerDb),
                 Loggers.CreateLogger<QueryMemories.Handler>());
             var sw = new Stopwatch();
             for (int i = 0; i < OperationsPerWorker; i++)
@@ -481,7 +483,7 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
     {
         await ResetFeedbackAsync();
 
-        DateTimeOffset cutoff = DateTimeOffset.UtcNow.AddDays(-RecentlyCapturedGraceDays);
+        Instant cutoff = SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-RecentlyCapturedGraceDays));
 
         // Ground truth: every long-lived uuids (min created before the grace cutoff) and every recently
         // captured uuids, computed directly from the store so the query is checked against reality.
@@ -510,10 +512,10 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
         // A large limit so the whole untouched pool is returned — a 500-row cap would make the set
         // equality vacuous when the pool is larger than the tuning surface's default.
         IReadOnlyList<NeverRecalledRow> never = await Reader.NeverRecalledAsync(
-            new NeverRecalledRequest(DateTimeOffset.UtcNow, 100_000), Ct);
+            new NeverRecalledRequest(SystemClock.Instance.GetCurrentInstant(), 100_000), Ct);
 
         MissRateResult missRate = await Reader.MissRateAsync(
-            new MissRateRequest(DateTimeOffset.UtcNow.AddDays(-MissRateWindowDays), DateTimeOffset.UtcNow.AddDays(1)), Ct);
+            new MissRateRequest(SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-MissRateWindowDays)), SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(1))), Ct);
 
         var neverSet = never.Select(x => x.MemoryUuid).ToHashSet();
 
@@ -525,7 +527,7 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
         return (neverSet.Count, untouched.Count, recentlyCaptured.Count, missRate.Misses, missRate.Retrievals, neverMatches);
     }
 
-    private async Task<IReadOnlyList<Guid>> UuidsByAgeAsync(DateTimeOffset cutoff, bool longLived)
+    private async Task<IReadOnlyList<Guid>> UuidsByAgeAsync(Instant cutoff, bool longLived)
     {
         string filter = longLived ? "min_created < @cutoff" : "min_created >= @cutoff";
         await using NpgsqlConnection conn = await DataSource.OpenConnectionAsync(Ct);
@@ -558,11 +560,11 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
         // before/after comparison is attributable because the reset isolates the change from prior records.
         await ResetFeedbackAsync();
         MissRateResult baseline = await Reader.MissRateAsync(
-            new MissRateRequest(DateTimeOffset.UtcNow.AddDays(-MissRateWindowDays), DateTimeOffset.UtcNow.AddDays(1)), Ct);
+            new MissRateRequest(SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-MissRateWindowDays)), SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(1))), Ct);
 
         await ResetFeedbackAsync();
         MissRateResult after = await Reader.MissRateAsync(
-            new MissRateRequest(DateTimeOffset.UtcNow.AddDays(-MissRateWindowDays), DateTimeOffset.UtcNow.AddDays(1)), Ct);
+            new MissRateRequest(SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-MissRateWindowDays)), SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(1))), Ct);
 
         report.AppendLine();
         report.AppendLine("### attributable before/after");
@@ -684,7 +686,7 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
 
     private SmoothAiProductContextMemoryDbContext NewDbContext() =>
         new(new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(DataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+            .UseNpgsql(DataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory())
             .Options);
 
     private async Task ResetFeedbackAsync()

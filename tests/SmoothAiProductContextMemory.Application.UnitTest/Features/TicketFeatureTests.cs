@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using System.Text.Json;
 using FluentValidation.TestHelper;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -71,7 +73,7 @@ public sealed class TicketFeatureTests
     [Fact]
     public void Removal_requires_explicit_parent_null_on_the_wire()
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var options = InstantJson.Configure(new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Should.Throw<JsonException>(() => JsonSerializer.Deserialize<SetTicketParent.Request>(
             """{"child":{"provider":"jira","key":"APP-2"},"reason":"remove","source":"user"}""", options));
         SetTicketParent.Request? request = JsonSerializer.Deserialize<SetTicketParent.Request>(
@@ -133,7 +135,7 @@ public sealed class TicketFeatureTests
     {
         FindTicketPaths.Request request = JsonSerializer.Deserialize<FindTicketPaths.Request>(
             """{"anchor":{"provider":"jira","key":"APP-2"}}""",
-            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            InstantJson.Configure(new JsonSerializerOptions(JsonSerializerDefaults.Web)))!;
         request.MaxDepth.ShouldBe(0);
         request.PathLimit.ShouldBe(50);
         request.MemoryLimit.ShouldBe(50);
@@ -144,7 +146,7 @@ public sealed class TicketFeatureTests
     public void Wire_depth_requires_a_json_number() =>
         Should.Throw<JsonException>(() => JsonSerializer.Deserialize<FindTicketPaths.Request>(
             """{"anchor":{"provider":"jira","key":"APP-2"},"maxDepth":"2"}""",
-            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            InstantJson.Configure(new JsonSerializerOptions(JsonSerializerDefaults.Web))));
 
     [Theory]
     [InlineData(null, null, true)]
@@ -190,7 +192,7 @@ public sealed class TicketFeatureTests
     {
         var graph = new RecordingGraph { Changed = changed };
         var handler = new SetTicketParent.Handler(graph, NullLogger<SetTicketParent.Handler>.Instance);
-        SetTicketParent.Request request = Change() with { ObservedAt = DateTimeOffset.UtcNow, ExpectedParent = new("jira", "APP-0") };
+        SetTicketParent.Request request = Change() with { ObservedAt = SystemClock.Instance.GetCurrentInstant(), ExpectedParent = new("jira", "APP-0") };
         SetTicketParent.Response response = await handler.Handle(request, TestContext.Current.CancellationToken);
         response.Changed.ShouldBe(changed);
         graph.Change.ShouldBe(new TicketParentChange(Child, Parent, request.ExpectedParent, request.Reason, request.Source, request.ObservedAt));

@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -17,7 +18,7 @@ internal static class TestEntities
             InitiativeId = DefaultInitiativeId,
             Repo = repo,
             Tickets = tickets ?? [],
-            CreatedOn = DateTimeOffset.UtcNow,
+            CreatedOn = SystemClock.Instance.GetCurrentInstant(),
         };
 
     public static Memory NewMemory(long groupId, string name, string description)

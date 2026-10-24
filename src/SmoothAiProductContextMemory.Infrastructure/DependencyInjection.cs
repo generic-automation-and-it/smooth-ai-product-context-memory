@@ -68,7 +68,7 @@ public static class DependencyInjection
         {
             options.UseNpgsql(
                 sp.GetRequiredService<NpgsqlDataSource>(),
-                npgsql => npgsql.UseSmoothAiProductContextMemoryHistory());
+                npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory());
         });
         services.AddScoped<IApplicationDbContext>(sp =>
             sp.GetRequiredService<SmoothAiProductContextMemoryDbContext>());
@@ -81,6 +81,7 @@ public static class DependencyInjection
         services.AddScoped<IMemoryGraph, NpgsqlMemoryGraph>();
         services.AddScoped<IMemoryTraversal, NpgsqlMemoryTraversal>();
         services.AddScoped<ITicketGraph, NpgsqlTicketGraph>();
+        services.AddScoped<IProductGraph, NpgsqlProductGraph>();
         services.AddScoped<IRecallFeedback, NpgsqlRecallFeedback>();
         services.AddScoped<IRecallFeedbackQuery, NpgsqlRecallFeedbackQuery>();
         services.AddSingleton<IDbErrorMapper, NpgsqlDbErrorMapper>();

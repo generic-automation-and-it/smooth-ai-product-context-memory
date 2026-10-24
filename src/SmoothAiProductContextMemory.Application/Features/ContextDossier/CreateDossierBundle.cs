@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -26,7 +27,7 @@ public static class CreateDossierBundle
         string? Status,
         string? ScopeDimension,
         bool IncludeHistory,
-        DateTimeOffset? AsOf,
+        Instant? AsOf,
         int WidenDepth) : IRequest<Response>;
 
     public sealed record Response(DossierBundle Bundle);
@@ -295,7 +296,8 @@ public static class CreateDossierBundle
                 selection.WidenedCount,
                 selection.Selected.Count,
                 selection.EdgeCount,
-                selection.HiddenPathDropped);
+                selection.HiddenPathDropped,
+                selection.ReferencedAnchors);
 
             return new DossierManifest(plan, selectedCount, reach, limitsHit, NoMatch: false);
         }

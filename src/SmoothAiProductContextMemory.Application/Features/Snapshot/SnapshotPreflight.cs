@@ -1,3 +1,4 @@
+using NodaTime;
 using Mediator;
 using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
@@ -15,7 +16,7 @@ public static class SnapshotPreflight
     public sealed record Request() : IRequest<Response>;
 
     public sealed record Response(
-        DateTimeOffset? LastSnapshotAt,
+        Instant? LastSnapshotAt,
         string Recency,
         int Memories,
         int Versions,
@@ -44,11 +45,11 @@ public static class SnapshotPreflight
                 return new Response(null, "never", 0, 0, 0, 0, 0, 0, 0);
             }
 
-            TimeSpan age = DateTimeOffset.UtcNow - metadata.LastSnapshotAt;
+            Duration age = SystemClock.Instance.GetCurrentInstant() - metadata.LastSnapshotAt;
 
             return new Response(
                 metadata.LastSnapshotAt,
-                SnapshotRecency.Format(age),
+                SnapshotRecency.Format(age.ToTimeSpan()),
                 metadata.Counts.Memories,
                 metadata.Counts.Versions,
                 metadata.Counts.Vertices,

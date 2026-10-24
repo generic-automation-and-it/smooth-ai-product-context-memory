@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -36,7 +37,7 @@ public sealed class NpgsqlCorpusCommitStore(SmoothAiProductContextMemoryDbContex
         command.Parameters.AddWithValue("key", operationKey);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken)
-            ? new OperationReceipt(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetFieldValue<DateTimeOffset>(4))
+            ? new OperationReceipt(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetFieldValue<Instant>(4))
             : null;
     }
 

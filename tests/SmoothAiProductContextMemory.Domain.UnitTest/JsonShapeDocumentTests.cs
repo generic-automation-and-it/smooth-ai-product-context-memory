@@ -1,3 +1,5 @@
+using NodaTime.Serialization.SystemTextJson;
+using NodaTime;
 using System.Text.Json;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -5,7 +7,7 @@ namespace SmoothAiProductContextMemory.Domain.UnitTest;
 
 public class JsonShapeDocumentTests
 {
-    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Web = new JsonSerializerOptions(JsonSerializerDefaults.Web).ConfigureForNodaTime(DateTimeZoneProviders.Tzdb);
 
     [Fact]
     public void TicketDocument_serialises_with_v_marker_first()
@@ -28,7 +30,7 @@ public class JsonShapeDocumentTests
     [Fact]
     public void SourceDocument_serialises_with_v_marker_first()
     {
-        var doc = SourceDocument.Create("ticket", "ACM-1", DateTimeOffset.UtcNow);
+        var doc = SourceDocument.Create("ticket", "ACM-1", SystemClock.Instance.GetCurrentInstant());
         string json = JsonSerializer.Serialize(doc, Web);
 
         using JsonDocument parsed = JsonDocument.Parse(json);
@@ -63,7 +65,7 @@ public class JsonShapeDocumentTests
     [Fact]
     public void SourceDocument_round_trips_preserving_v_marker()
     {
-        string json = JsonSerializer.Serialize(SourceDocument.Create("ticket", "ACM-1", DateTimeOffset.UtcNow), Web);
+        string json = JsonSerializer.Serialize(SourceDocument.Create("ticket", "ACM-1", SystemClock.Instance.GetCurrentInstant()), Web);
         SourceDocument? back = JsonSerializer.Deserialize<SourceDocument>(json, Web);
 
         back.ShouldNotBeNull();

@@ -1,5 +1,7 @@
+using NodaTime;
 using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -129,16 +131,16 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         Db.MemoryGroups.Add(group);
         await Db.SaveChangesAsync(Ct);
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Instant now = SystemClock.Instance.GetCurrentInstant();
         SetMemories.Request expired = Approved(group.Uuid, "Expired fact");
         expired = expired with
         {
-            Items = [expired.Items[0] with { ValidFrom = now.AddDays(-10), ValidUntil = now.AddDays(-5) }]
+            Items = [expired.Items[0] with { ValidFrom = now.Plus(Duration.FromDays(-10)), ValidUntil = now.Plus(Duration.FromDays(-5)) }]
         };
         await NewSet().Handle(expired, Ct);
 
         SetMemories.Request live = Approved(group.Uuid, "Live fact");
-        live = live with { Items = [live.Items[0] with { ValidFrom = now.AddDays(-1), ValidUntil = null }] };
+        live = live with { Items = [live.Items[0] with { ValidFrom = now.Plus(Duration.FromDays(-1)), ValidUntil = null }] };
         await NewSet().Handle(live, Ct);
 
         QueryMemories.Handler query = NewQuery();
@@ -146,7 +148,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         (await query.Handle(Query() with { AsOf = now }, Ct))
             .Items.Select(i => i.Description).ShouldBe(["Live fact"]);
 
-        (await query.Handle(Query() with { AsOf = now.AddDays(-7) }, Ct))
+        (await query.Handle(Query() with { AsOf = now.Plus(Duration.FromDays(-7)) }, Ct))
             .Items.Select(i => i.Description).ShouldBe(["Expired fact"]);
 
         // No as-of means no temporal narrowing.
@@ -189,7 +191,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         Db.MemoryGroups.Add(group);
         await Db.SaveChangesAsync(Ct);
 
-        var asOf = new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero);
+        var asOf = Instant.FromDateTimeOffset(new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero));
         SetMemories.Handler set = NewSet();
 
         // v1 valid in the past, v2 valid from the future onwards. At `asOf` neither is "current and
@@ -197,7 +199,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         SetMemories.Request first = Approved(group.Uuid, "Versioned fact", "Old claim");
         first = first with
         {
-            Items = [first.Items[0] with { ValidFrom = asOf.AddDays(-10), ValidUntil = asOf.AddDays(-5) }],
+            Items = [first.Items[0] with { ValidFrom = asOf.Plus(Duration.FromDays(-10)), ValidUntil = asOf.Plus(Duration.FromDays(-5)) }],
         };
         Guid uuid = (await set.Handle(first, Ct)).Items[0].Uuid!.Value;
 
@@ -207,7 +209,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
             Items = [second.Items[0] with
             {
                 Uuid = uuid,
-                ValidFrom = asOf.AddDays(1),
+                ValidFrom = asOf.Plus(Duration.FromDays(1)),
                 ValidUntil = null,
             }],
         };
@@ -228,11 +230,11 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         // A point inside v1's own window still returns nothing under the default CurrentOnly: v1 is
         // no longer current, and the query does not rewind to find it. This is the statement that
         // would fail if the reverted experiment were re-landed.
-        (await query.Handle(Query() with { AsOf = asOf.AddDays(-7) }, Ct)).Items.ShouldBeEmpty();
+        (await query.Handle(Query() with { AsOf = asOf.Plus(Duration.FromDays(-7)) }, Ct)).Items.ShouldBeEmpty();
 
         // Dropping CurrentOnly makes v1 a candidate in its own right, and then its window admits it —
         // so the version is returned because it is valid, not because anything rewound.
-        (await query.Handle(Query() with { AsOf = asOf.AddDays(-7), CurrentOnly = false }, Ct))
+        (await query.Handle(Query() with { AsOf = asOf.Plus(Duration.FromDays(-7)), CurrentOnly = false }, Ct))
             .Items.Select(i => i.Statement).ShouldBe(["Old claim"]);
 
         // And with no AsOf the current version is what comes back, as everywhere else.
@@ -265,17 +267,313 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         response.Items.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task Ticket_query_returns_the_owner_group_union_its_references()
+    {
+        var alpha = new Initiative { Name = "InitiativeAlpha" };
+        var beta = new Initiative { Name = "InitiativeBeta" };
+        Db.Initiatives.AddRange(alpha, beta);
+        await Db.SaveChangesAsync(Ct);
+
+        var owner = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "231", "https://tracker/231")]);
+        owner.InitiativeId = alpha.Id;
+        var referenceGroup = TestEntities.NewGroup();
+        referenceGroup.InitiativeId = beta.Id;
+        Db.MemoryGroups.AddRange(owner, referenceGroup);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(owner.Uuid, "Owner fact"), Ct);
+        SetMemories.Request reference = Approved(referenceGroup.Uuid, "Referencing fact");
+        reference = reference with { TicketReferences = [new TicketReferenceInput("github", "231")] };
+        await set.Handle(reference, Ct);
+
+        QueryMemories.Handler query = NewQuery();
+
+        var union = await query.Handle(
+            Query() with { TicketProvider = "github", TicketKey = "231" }, Ct);
+        union.Items.Select(i => i.Description).ShouldBe(["Owner fact", "Referencing fact"], ignoreOrder: true);
+
+        union.Items.Single(i => i.Description == "Owner fact").TicketMatch.ShouldBe("owner");
+        union.Items.Single(i => i.Description == "Referencing fact").TicketMatch.ShouldBe("reference");
+
+        // Every other filter stays conjunctive over the union: an initiative narrows to one branch.
+        (await query.Handle(
+            Query() with { TicketProvider = "github", TicketKey = "231", InitiativeName = "InitiativeAlpha" }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Owner fact"]);
+        (await query.Handle(
+            Query() with { TicketProvider = "github", TicketKey = "231", InitiativeName = "InitiativeBeta" }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Referencing fact"]);
+    }
+
+    [Fact]
+    public async Task Ticket_query_hides_a_program_scoped_reference_without_explicit_scope()
+    {
+        var alpha = new Initiative { Name = "InitiativeAlpha" };
+        var beta = new Initiative { Name = "InitiativeBeta" };
+        Db.Initiatives.AddRange(alpha, beta);
+        await Db.SaveChangesAsync(Ct);
+
+        var owner = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "231", "https://tracker/231")]);
+        owner.InitiativeId = alpha.Id;
+        var referenceProgram = TestEntities.NewGroup(scopeDimension: MemoryGroup.ScopeDimensionValue.Program);
+        referenceProgram.InitiativeId = beta.Id;
+        Db.MemoryGroups.AddRange(owner, referenceProgram);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(owner.Uuid, "Owner fact"), Ct);
+        SetMemories.Request reference = Approved(referenceProgram.Uuid, "Program reference");
+        reference = reference with { TicketReferences = [new TicketReferenceInput("github", "231")] };
+        await set.Handle(reference, Ct);
+
+        QueryMemories.Handler query = NewQuery();
+
+        // D2: a reference is not in-group context, so programme is hidden unless the scope was asked for.
+        (await query.Handle(Query() with { TicketProvider = "github", TicketKey = "231" }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Owner fact"]);
+
+        // The owner group keeps group context, so an owner-group programme memory is still returned.
+        var ownerProgram = TestEntities.NewGroup(scopeDimension: MemoryGroup.ScopeDimensionValue.Program);
+        ownerProgram.InitiativeId = alpha.Id;
+        Db.MemoryGroups.Add(ownerProgram);
+        await Db.SaveChangesAsync(Ct);
+        await set.Handle(Approved(ownerProgram.Uuid, "Owner programme fact"), Ct);
+
+        (await query.Handle(Query() with { TicketProvider = "github", TicketKey = "231", ScopeDimension = MemoryGroup.ScopeDimensionValue.Program }, Ct))
+            .Items.Select(i => i.Description).ShouldContain("Program reference");
+    }
+
+    [Fact]
+    public async Task Ticket_query_applies_the_limit_after_the_union()
+    {
+        var alpha = new Initiative { Name = "InitiativeAlpha" };
+        var beta = new Initiative { Name = "InitiativeBeta" };
+        Db.Initiatives.AddRange(alpha, beta);
+        await Db.SaveChangesAsync(Ct);
+
+        var owner = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "231", "https://tracker/231")]);
+        owner.InitiativeId = alpha.Id;
+        var referenceGroup = TestEntities.NewGroup();
+        referenceGroup.InitiativeId = beta.Id;
+        Db.MemoryGroups.AddRange(owner, referenceGroup);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(owner.Uuid, "Owner one"), Ct);
+        await set.Handle(Approved(owner.Uuid, "Owner two"), Ct);
+        await set.Handle(Approved(referenceGroup.Uuid, "Reference one") with { TicketReferences = [new TicketReferenceInput("github", "231")] }, Ct);
+        await set.Handle(Approved(referenceGroup.Uuid, "Reference two") with { TicketReferences = [new TicketReferenceInput("github", "231")] }, Ct);
+
+        var response = await NewQuery().Handle(
+            Query() with { TicketProvider = "github", TicketKey = "231", Limit = 3 }, Ct);
+
+        response.Items.Count.ShouldBe(3);
+    }
+
+    /// <summary>
+    /// A row's ticket list is assembled from both homes of the binding — the group's membership array
+    /// and the graph's <c>ABOUT</c> edges — so a card names every ticket the memory is bound to and says
+    /// which is which. Without the reference leg the UI would hide a binding the query can find.
+    /// </summary>
+    [Fact]
+    public async Task A_row_carries_the_group_owned_and_the_referenced_tickets_each_marked()
+    {
+        var owner = TestEntities.NewGroup(tickets:
+        [
+            TicketDocument.Create("github", "231", "https://tracker/231"),
+            TicketDocument.Create("jira", "GPA-234", "https://tracker/GPA-234"),
+        ]);
+        var target = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "999", "https://tracker/999")]);
+        var referencing = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(owner, target, referencing);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(owner.Uuid, "Owner fact"), Ct);
+        await set.Handle(Approved(target.Uuid, "Target fact"), Ct);
+        await set.Handle(Approved(referencing.Uuid, "Referencing fact") with
+        {
+            TicketReferences = [new TicketReferenceInput("github", "999")],
+        }, Ct);
+
+        QueryMemories.Response response = await NewQuery().Handle(Query(), Ct);
+
+        CheapMemory owned = response.Items.Single(i => i.Description == "Owner fact");
+        owned.Tickets
+            .Select(t => (t.Provider, t.Key, t.Match))
+            .ShouldBe(
+                [
+                    ("github", "231", TicketMatchValue.Owner),
+                    ("jira", "GPA-234", TicketMatchValue.Owner),
+                ],
+                ignoreOrder: true);
+
+        CheapMemory referenced = response.Items.Single(i => i.Description == "Referencing fact");
+        referenced.Tickets
+            .Select(t => (t.Provider, t.Key, t.Match))
+            .ShouldBe([("github", "999", TicketMatchValue.Reference)]);
+    }
+
+    /// <summary>
+    /// The membership array is the ownership authority (LADR-08), so a duplicate <c>ABOUT</c> edge on a
+    /// ticket the group already owns is one binding, not two — otherwise the card would name it twice.
+    /// The write path refuses such a reference, so the edge is created directly to reach the defence.
+    /// </summary>
+    [Fact]
+    public async Task An_owned_ticket_referenced_by_its_own_group_is_one_owner_binding()
+    {
+        var group = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "231", "https://tracker/231")]);
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        var memory = (await NewSet().Handle(Approved(group.Uuid, "Doubly bound fact"), Ct)).Items[0];
+        await Graph.CreateAboutAsync(memory.Uuid!.Value, "github", "231", "declared outside the write path", Ct);
+
+        CheapMemory row = (await NewQuery().Handle(Query(), Ct)).Items.ShouldHaveSingleItem();
+
+        row.Tickets
+            .Select(t => (t.Provider, t.Key, t.Match))
+            .ShouldBe([("github", "231", TicketMatchValue.Owner)]);
+    }
+
+    /// <summary>
+    /// The assembly is anchored on the returned page, so one memory's reference must not surface on a
+    /// sibling row of the same query.
+    /// </summary>
+    [Fact]
+    public async Task A_reference_stays_on_its_own_row_within_the_page()
+    {
+        var target = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "999", "https://tracker/999")]);
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(target, group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(target.Uuid, "Target fact"), Ct);
+        await set.Handle(Approved(group.Uuid, "Referencing fact") with
+        {
+            TicketReferences = [new TicketReferenceInput("github", "999")],
+        }, Ct);
+        await set.Handle(Approved(group.Uuid, "Unrelated fact"), Ct);
+
+        QueryMemories.Response response = await NewQuery().Handle(Query(), Ct);
+
+        response.Items.Single(i => i.Description == "Unrelated fact").Tickets.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Inspect_reports_scope_and_match_count_without_rows()
+    {
+        var product = TestEntities.NewGroup();
+        var program = TestEntities.NewGroup(MemoryGroup.ScopeDimensionValue.Program);
+        Db.MemoryGroups.AddRange(product, program);
+        await Db.SaveChangesAsync(Ct);
+
+        await NewSet().Handle(Approved(product.Uuid, "Product fact"), Ct);
+        await NewSet().Handle(Approved(program.Uuid, "Program fact"), Ct);
+
+        QueryMemories.Response response = await NewQuery().Handle(Query() with { Inspect = true }, Ct);
+
+        // Inspection ships evidence, never the matched rows.
+        response.Items.ShouldBeEmpty();
+        QueryMemories.Inspection inspection = response.Inspection.ShouldNotBeNull();
+        inspection.IsInspection.ShouldBeTrue();
+        inspection.Note.ShouldBeNull();
+
+        // Scope is enforced, not skipped: an open search hides programme and the count reflects it.
+        inspection.RequiredScopeDimension.ShouldBeNull();
+        inspection.ExcludedScopeDimensions.ShouldContain(MemoryGroup.ScopeDimensionValue.Program);
+        inspection.MatchedCount.ShouldBe(1);
+        inspection.Limited.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Inspect_records_no_recall_feedback()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        await NewSet().Handle(Approved(group.Uuid, "Fact"), Ct);
+
+        var feedback = new TrackingRecallFeedback();
+        QueryMemories.Response response = await NewQuery(feedback).Handle(Query() with { Inspect = true }, Ct);
+
+        response.Inspection.ShouldNotBeNull();
+        feedback.Records.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Inspect_reports_the_tsquery_lexemes_for_free_text()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        await NewSet().Handle(Approved(group.Uuid, "The storage engine", "We chose PostgreSQL"), Ct);
+
+        QueryMemories.Inspection inspection = (await NewQuery().Handle(
+            Query() with { Inspect = true, Query = "storage" }, Ct)).Inspection.ShouldNotBeNull();
+
+        // The decomposed predicate the FTS index compares against: the stemmed lexeme, not the raw text.
+        inspection.FreeText.ShouldBe("storage");
+        inspection.TsQuery.ShouldNotBeNull().ShouldContain("storag");
+        inspection.MatchedCount.ShouldBeGreaterThanOrEqualTo(1);
+    }
+
+    [Fact]
+    public async Task Inspect_unknown_ticket_returns_miss_note_without_rows_or_feedback()
+    {
+        var feedback = new TrackingRecallFeedback();
+        QueryMemories.Response response = await NewQuery(feedback).Handle(
+            Query() with { Inspect = true, TicketProvider = "jira", TicketKey = "NOPE-1" }, Ct);
+
+        response.Items.ShouldBeEmpty();
+        QueryMemories.Inspection inspection = response.Inspection.ShouldNotBeNull();
+        inspection.Note.ShouldBe("ticket-miss");
+        inspection.MatchedCount.ShouldBe(0);
+        feedback.Records.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A malformed membership element must not cost the practitioner the page: the read is unnested in
+    /// SQL, so the half-ticket is dropped and the page still renders.
+    /// </summary>
+    [Fact]
+    public async Task A_membership_element_without_a_provider_or_key_is_left_out()
+    {
+        var group = TestEntities.NewGroup();
+        group.Tickets.Add(new TicketDocument { Key = "no-provider", Url = "https://tracker/no-provider" });
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        await NewSet().Handle(Approved(group.Uuid, "Half bound fact"), Ct);
+
+        CheapMemory row = (await NewQuery().Handle(Query(), Ct)).Items.ShouldHaveSingleItem();
+        row.Tickets.ShouldBeEmpty();
+    }
+
     private SetMemories.Handler NewSet() =>
-        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
+        new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
 
     private QueryMemories.Handler NewQuery() =>
-        new(AppDb, Search, new NoopRecallFeedback(), Loggers.CreateLogger<QueryMemories.Handler>());
+        new(AppDb, Search, new NoopRecallFeedback(), ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
+
+    private QueryMemories.Handler NewQuery(IRecallFeedback feedback) =>
+        new(AppDb, Search, feedback, ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
 
     private sealed class NoopRecallFeedback : IRecallFeedback
     {
         public void Record(RecallFeedbackRecord[] records)
         {
         }
+    }
+
+    private sealed class TrackingRecallFeedback : IRecallFeedback
+    {
+        public List<RecallFeedbackRecord> Records { get; } = [];
+
+        public void Record(RecallFeedbackRecord[] records) => Records.AddRange(records);
     }
 
     private static QueryMemories.Request Query() =>
@@ -304,7 +602,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow.AddDays(-1),
+                    SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1)),
                     null,
                     null,
                     null)

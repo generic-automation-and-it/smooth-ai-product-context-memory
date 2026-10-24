@@ -57,7 +57,7 @@ public sealed class CliRestoreExitCodeTests(AspireFixture aspire)
     }
 
     private static SnapshotCapture Graph(Guid[] vertices, SnapshotEdge[] edges) =>
-        new([], [], [], [], [], [], [.. vertices.Select(v => new SnapshotVertex(v))], edges, [], []);
+        new([], [], [], [], [], [], [.. vertices.Select(v => new SnapshotVertex(v))], edges, [], [], [], [], [], [], [], []);
 
     private async Task<(int Exit, string Printed, long Edges)> RestoreAsync(SnapshotCapture capture)
     {
@@ -119,7 +119,7 @@ public sealed class CliRestoreExitCodeTests(AspireFixture aspire)
         var services = new ServiceCollection();
         services.AddSingleton(dataSource);
         services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
-            options.UseNpgsql(dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory()));
+            options.UseNpgsql(dataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory()));
         await using ServiceProvider provider = services.BuildServiceProvider();
         await provider.MigrateSmoothAiProductContextMemoryAsync(Ct);
     }

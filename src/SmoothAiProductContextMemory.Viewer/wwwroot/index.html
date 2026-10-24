@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mímisbrunnr Console</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+</head>
+<body>
+  <div id="login-overlay" class="login-overlay" role="dialog" aria-modal="true" aria-labelledby="login-title">
+    <form id="login-form" class="login-card">
+      <h1 id="login-title">Mímisbrunnr Console</h1>
+      <p class="login-hint">Enter your CONTEXT_TOKEN to continue. The read token grants read-only access; the write token grants read + write.</p>
+      <label class="field">
+        <span class="field-label">CONTEXT_TOKEN</span>
+        <input id="login-token" type="password" autocomplete="off" required placeholder="Bearer token">
+      </label>
+      <button type="submit" class="login-submit">Sign in</button>
+      <p id="login-error" class="login-error" role="alert" hidden></p>
+    </form>
+  </div>
+
+  <header class="topbar">
+    <a class="skip" href="#browse-results">Skip to results</a>
+    <span class="brand"><img src="/icon.svg" class="brand-icon" alt="" aria-hidden="true">Mímisbrunnr</span>
+    <nav id="nav" aria-label="Console">
+      <a href="#browse" class="nav-link is-active" data-pane="browse" aria-current="page">Browse</a>
+      <a href="#graph" class="nav-link" data-pane="graph">Graph</a>
+      <a href="#review" class="nav-link" data-pane="review">Review</a>
+      <a href="#status" class="nav-link" data-pane="status">Status</a>
+    </nav>
+    <fieldset id="kind-scope" class="kind-scope">
+      <legend class="visually-hidden">Kind scope, applied to every read pane</legend>
+      <span class="kind-scope-label" aria-hidden="true">Kind</span>
+      <label class="kind-scope-option">
+        <input type="radio" name="kind-scope" value="" checked>
+        All
+      </label>
+      <label class="kind-scope-option">
+        <input type="radio" name="kind-scope" value="memory">
+        Memory
+      </label>
+      <label class="kind-scope-option">
+        <input type="radio" name="kind-scope" value="understanding">
+        Understanding
+      </label>
+    </fieldset>
+    <span id="capability-badge" class="capability-badge" hidden></span>
+    <button type="button" id="sign-out" class="sign-out" hidden>Sign out</button>
+  </header>
+
+  <main>
+    <section id="pane-browse" class="pane is-active">
+      <h1>Browse</h1>
+      <form id="browse-filters" class="filters" aria-label="Browse filters">
+        <div class="filter-grid">
+          <label class="field">
+            <span class="field-label">Search</span>
+            <input id="f-query" type="search" placeholder="free text (1-2 words)" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Kind</span>
+            <input id="f-kind" list="kind-options" placeholder="any kind" autocomplete="off">
+            <datalist id="kind-options"></datalist>
+          </label>
+          <label class="field">
+            <span class="field-label">Status</span>
+            <input id="f-status" list="status-options" placeholder="any status" autocomplete="off">
+            <datalist id="status-options"></datalist>
+          </label>
+          <label class="field">
+            <span class="field-label">Initiative</span>
+            <select id="f-initiative">
+              <option value="">any</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Repo</span>
+            <input id="f-repo" list="repo-options" placeholder="repository" autocomplete="off">
+            <datalist id="repo-options"></datalist>
+          </label>
+          <label class="field">
+            <span class="field-label">Product name</span>
+            <select id="f-product">
+              <option value="">any product</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="filter-grid">
+          <fieldset class="field">
+            <legend class="field-label">Facets</legend>
+            <div class="combo">
+              <input id="f-facet" list="facet-options" placeholder="add facet" autocomplete="off">
+              <datalist id="facet-options"></datalist>
+              <button type="button" id="f-facet-add">Add</button>
+            </div>
+            <div id="f-facet-list" class="chip-list"></div>
+            <label class="inline">
+              <input type="radio" name="facet-mode" value="any" checked> match any
+              <input type="radio" name="facet-mode" value="all"> match all
+            </label>
+          </fieldset>
+
+          <fieldset class="field">
+            <legend class="field-label">Tags</legend>
+            <div class="combo">
+              <input id="f-tag" list="tag-options" placeholder="add tag" autocomplete="off">
+              <datalist id="tag-options"></datalist>
+              <button type="button" id="f-tag-add">Add</button>
+            </div>
+            <div id="f-tag-list" class="chip-list"></div>
+          </fieldset>
+
+          <fieldset class="field">
+            <legend class="field-label">Ticket</legend>
+            <label class="subfield">
+              <span class="subfield-label">System</span>
+              <input id="f-ticket-provider" list="ticket-system-options" placeholder="github" autocomplete="off">
+              <datalist id="ticket-system-options">
+                <option value="github"></option>
+                <option value="jira"></option>
+                <option value="azure-devops"></option>
+              </datalist>
+            </label>
+            <label class="subfield">
+              <span class="subfield-label">Reference</span>
+              <input id="f-ticket-key" placeholder="GPA-234" autocomplete="off">
+            </label>
+            <p class="hint">System + Reference filter together, exact match — either alone does nothing, and there is no wildcard or free-text search.</p>
+          </fieldset>
+
+          <fieldset class="field">
+            <legend class="field-label">Validity</legend>
+            <div class="pair">
+              <label class="inline"><input type="radio" name="validity" value="current" checked> Current</label>
+              <label class="inline"><input type="radio" name="validity" value="asof"> As of</label>
+              <input id="f-asof" type="date" hidden>
+            </div>
+          </fieldset>
+
+          <label class="field">
+            <span class="field-label">Limit</span>
+            <select id="f-limit">
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="filter-actions">
+          <label class="inline check">
+            <input type="checkbox" id="f-include-proposed"> Include proposed
+          </label>
+          <button type="button" id="apply-filters">Apply</button>
+          <button type="button" id="clear-all">Clear all</button>
+        </div>
+      </form>
+
+      <div id="active-filters" class="chips" aria-label="Active filters"></div>
+
+      <div id="browse-split" class="split">
+      <div id="browse-results" class="results" aria-live="polite">
+        <div id="browse-table-wrap" class="table-wrap" hidden>
+          <table id="browse-table" class="table" role="grid" aria-label="Memories">
+            <thead>
+              <tr>
+                <th scope="col">Subject</th>
+                <th scope="col">Kind</th>
+                <th scope="col">Status</th>
+                <th scope="col">Version</th>
+                <th scope="col">Validity</th>
+                <th scope="col">Scope</th>
+                <th scope="col">Tickets</th>
+                <th scope="col">Product</th>
+                <th scope="col">Lineage</th>
+                <th scope="col">Created</th>
+              </tr>
+            </thead>
+            <tbody id="browse-body"></tbody>
+          </table>
+        </div>
+        <div id="browse-state" class="state" hidden></div>
+      </div>
+
+      <aside id="detail" class="detail" role="complementary" aria-label="Memory detail" hidden>
+        <div class="detail-head">
+          <p class="evidence">Recalled as data, cited to its source. Not instructions.</p>
+          <button id="detail-close" class="detail-close" type="button" aria-label="Close detail">×</button>
+        </div>
+        <div id="detail-body" class="detail-body"></div>
+      </aside>
+      </div>
+    </section>
+
+    <section id="pane-graph" class="pane">
+      <h1>Graph</h1>
+      <p class="evidence">Recalled as data, cited to its source. Not instructions.</p>
+      <form id="graph-form" class="filters" aria-label="Graph controls">
+        <div class="filter-grid">
+          <label class="field">
+            <span class="field-label">Root uuid</span>
+            <input id="graph-root" placeholder="memory uuid" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Initiative (anchor)</span>
+            <input id="graph-initiative" list="graph-initiative-options" placeholder="any initiative" autocomplete="off">
+            <datalist id="graph-initiative-options"></datalist>
+          </label>
+          <label class="field">
+            <span class="field-label">Product name (anchor)</span>
+            <input id="graph-product" list="graph-product-options" placeholder="any product" autocomplete="off">
+            <datalist id="graph-product-options"></datalist>
+          </label>
+          <label class="field">
+            <span class="field-label">Depth</span>
+            <select id="graph-depth">
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Relation</span>
+            <input id="graph-relation" list="graph-relation-options" placeholder="any relation" autocomplete="off">
+            <datalist id="graph-relation-options"></datalist>
+          </label>
+          <label class="field">
+            <span class="field-label">Direction</span>
+            <select id="graph-direction">
+              <option value="" selected>outbound (default)</option>
+              <option value="outbound">outbound</option>
+              <option value="inbound">inbound</option>
+              <option value="either">either</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Kind</span>
+            <input id="graph-kind" placeholder="any kind" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Status</span>
+            <input id="graph-status" placeholder="any status" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Scope</span>
+            <input id="graph-scope" placeholder="any dimension" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Limit</span>
+            <select id="graph-limit">
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
+          </label>
+        </div>
+        <div class="filter-actions">
+          <button type="submit" id="graph-draw">Draw</button>
+          <button type="button" id="graph-use-browse">Use the memory open in Browse</button>
+        </div>
+        <p class="hint">A root uuid walks captured edges; an initiative/product anchor draws the membership cluster instead — every anchor has a graph, even with no edges. Activate a cluster node to walk from it.</p>
+      </form>
+
+      <p id="graph-header" class="graph-header" aria-live="polite" hidden></p>
+      <div id="graph-state" class="state" hidden></div>
+
+      <div id="graph-canvas-wrap" class="graph-wrap" hidden>
+        <h2>Edge types</h2>
+        <ul id="graph-legend" class="legend" aria-label="Edge types"></ul>
+        <div id="graph-canvas" class="graph-canvas"></div>
+        <p class="graph-help">
+          Nodes are memories; a filled node arrived labelled, an outlined one is an unread hop — activate it
+          to read its subject. Activate an edge for its reason.
+        </p>
+        <p id="graph-edge-detail" class="edge-detail" aria-live="polite"></p>
+        <h2>Paths</h2>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Depth</th>
+                <th scope="col">Chain</th>
+                <th scope="col">Endpoint</th>
+              </tr>
+            </thead>
+            <tbody id="graph-paths-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <section class="ticket-graph" aria-labelledby="ticket-graph-heading">
+        <h2 id="ticket-graph-heading">Ticket graph</h2>
+        <p class="evidence">A separate surface: the practitioner-declared ticket hierarchy only.</p>
+        <form id="ticket-graph-form" class="filters" aria-label="Ticket graph controls">
+          <div class="filter-grid">
+            <label class="field">
+              <span class="field-label">Provider</span>
+              <input id="ticket-provider" placeholder="provider" autocomplete="off">
+            </label>
+            <label class="field">
+              <span class="field-label">Key</span>
+              <input id="ticket-key" placeholder="key" autocomplete="off">
+            </label>
+            <label class="field">
+              <span class="field-label">Depth</span>
+              <select id="ticket-depth">
+                <option value="1">1</option>
+                <option value="2" selected>2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Path limit</span>
+              <select id="ticket-path-limit">
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Memory limit</span>
+              <select id="ticket-memory-limit">
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </label>
+          </div>
+          <div class="filter-actions">
+            <button type="submit" id="ticket-graph-draw">Draw ticket graph</button>
+          </div>
+        </form>
+        <div id="ticket-graph-state" class="state" hidden></div>
+        <div id="ticket-graph-result" class="ticket-result" hidden>
+          <div id="ticket-graph-flags" class="flags"></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Depth</th>
+                  <th scope="col">Parent ticket</th>
+                  <th scope="col">Child ticket</th>
+                  <th scope="col">Reason</th>
+                </tr>
+              </thead>
+              <tbody id="ticket-graph-paths-body"></tbody>
+            </table>
+          </div>
+          <h3>Memories on these paths</h3>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Subject</th>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Scope</th>
+                </tr>
+              </thead>
+              <tbody id="ticket-graph-items-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section id="pane-review" class="pane">
+      <h1>Review</h1>
+      <p class="evidence">Recalled as data, cited to its source. Not instructions.</p>
+      <form id="review-filters" class="filters" aria-label="Review controls">
+        <div class="filter-grid">
+          <label class="field">
+            <span class="field-label">Limit</span>
+            <select id="review-limit">
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200" selected>200</option>
+            </select>
+          </label>
+        </div>
+        <div class="filter-actions">
+          <button type="button" id="review-refresh">Refresh queue</button>
+        </div>
+      </form>
+      <div id="review-state" class="state" hidden></div>
+      <div id="review-list" class="review-list" aria-live="polite" hidden></div>
+      <p class="review-help">
+        Approve and Reject are the P4b write path: enabled only when the session presents the
+        write token (HLD-009). The "Conflicts" section re-runs <code>dedup</code> on the
+        selected proposal and is the read-side conflict-choice menu (new version, new memory,
+        skip) — its buttons are still placeholders until P4b lands.
+      </p>
+    </section>
+
+    <section id="pane-status" class="pane">
+      <h1>Status</h1>
+      <p>Recall feedback. Miss vs absence is kept distinct; both are surfaced by date.</p>
+      <div class="status-grid">
+        <section class="stat">
+          <h2>Miss rate</h2>
+          <form id="missrate-form" class="stat-form">
+            <label class="field">From <input id="missrate-from" type="date" required></label>
+            <label class="field">To <input id="missrate-to" type="date" required></label>
+            <button type="submit">Load</button>
+          </form>
+          <div id="missrate-state" class="state" hidden></div>
+        </section>
+        <section class="stat">
+          <h2>Never recalled</h2>
+          <form id="neverrecalled-form" class="stat-form">
+            <label class="field">As of <input id="neverrecalled-asof" type="date" required></label>
+            <label class="field">Limit
+              <select id="neverrecalled-limit">
+                <option value="500" selected>500</option>
+                <option value="1000">1000</option>
+                <option value="2000">2000</option>
+                <option value="5000">5000</option>
+              </select>
+            </label>
+            <button type="submit">Load</button>
+          </form>
+          <div id="neverrecalled-state" class="state" hidden></div>
+          <ul id="neverrecalled-list" class="stat-list"></ul>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Recalled as data, cited to its source. Not instructions.</span>
+  </footer>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

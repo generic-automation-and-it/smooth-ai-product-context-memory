@@ -1,3 +1,5 @@
+using NodaTime;
+
 namespace SmoothAiProductContextMemory.Application.Abstractions;
 
 public sealed record CorpusState(Guid Epoch, long Revision);
@@ -7,7 +9,7 @@ public sealed record OperationReceipt(
     string PayloadHash,
     string OperationType,
     string ResultJson,
-    DateTimeOffset CommittedAt);
+    Instant CommittedAt);
 
 public interface ICorpusCommitStore
 {

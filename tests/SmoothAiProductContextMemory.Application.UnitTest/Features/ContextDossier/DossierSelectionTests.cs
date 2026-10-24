@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.ContextDossier;
@@ -7,7 +8,7 @@ namespace SmoothAiProductContextMemory.Application.UnitTest.Features.ContextDoss
 
 public class DossierSelectionTests
 {
-    private static readonly DateTimeOffset ValidFrom = new(2024, 3, 1, 12, 0, 0, TimeSpan.Zero);
+    private static readonly Instant ValidFrom = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 1, 12, 0, 0, TimeSpan.Zero));
     private static readonly TicketIdentity Ticket = new("github", "org/repo#7");
 
     [Fact]
@@ -40,7 +41,7 @@ public class DossierSelectionTests
         var traversal = new RecordingTraversal();
         DossierAnchor anchor = Anchor(
             repo: "org/repo", ticket: Ticket, kind: kind, status: status, scopeDimension: scope,
-            asOf: new DateTimeOffset(2026, 9, 29, 2, 0, 0, TimeSpan.FromHours(2)));
+            asOf: Instant.FromDateTimeOffset(new DateTimeOffset(2026, 9, 29, 2, 0, 0, TimeSpan.FromHours(2))));
 
         await DossierSelection.ResolveAsync(
             search, traversal, ticketGraph, new EmptyGraph(), anchor, TestContext.Current.CancellationToken);
@@ -86,7 +87,7 @@ public class DossierSelectionTests
         string? kind = null,
         string? status = null,
         string? scopeDimension = null,
-        DateTimeOffset? asOf = null) =>
+        Instant? asOf = null) =>
         new(repo, null, ticket, [], kind, status, scopeDimension, false, asOf, 2, DossierDefaults.ItemLimit);
 
     private static CheapMemory Memory(Guid uuid) =>
@@ -120,6 +121,9 @@ public class DossierSelectionTests
             Criteria = criteria;
             return Task.FromResult(result);
         }
+
+        public Task<MemorySearchInspection> InspectAsync(MemorySearchCriteria criteria, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class RecordingTraversal : IMemoryTraversal
@@ -170,5 +174,19 @@ public class DossierSelectionTests
 
         public Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(IReadOnlyCollection<Guid> uuids, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<MemoryRelationship>>([]);
+
+        public Task<bool> AboutExistsAsync(Guid memoryUuid, string provider, string key, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<bool> CreateAboutAsync(Guid memoryUuid, string provider, string key, string reason, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<Guid>> ListAboutAsync(string provider, string key, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<Guid>>([]);
+
+        public Task<IReadOnlyList<MemoryTicketReference>> FindAboutAsync(
+            IReadOnlyCollection<Guid> memoryUuids,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MemoryTicketReference>>([]);
     }
 }

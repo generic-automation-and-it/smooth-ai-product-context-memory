@@ -102,7 +102,7 @@
       "retrievalPolicy": "scoped"
     },
     "selectedCount": 4,
-    "reach": {"widenDepth": 1, "anchors": 1, "widened": 4, "selected": 4, "edges": 2, "hiddenPathDropped": false},
+    "reach": {"widenDepth": 1, "anchors": 4, "widened": 0, "selected": 4, "edges": 2, "hiddenPathDropped": false},
     "limitsHit": [],
     "noMatch": false
   }

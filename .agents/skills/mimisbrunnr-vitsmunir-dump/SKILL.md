@@ -56,11 +56,8 @@ I’ll listen and hold the context for [target if known]; I won’t update anyth
 
 If the target artifact is ambiguous, still start listening. Do not block the session unless acting later would be impossible without clarification.
 
-Fill a missing repository / ticket binding from the sibling `mimisbrunnr-heimdallr-find-session-metadata`
-reporter by default (offline git scan under the same skills root — `.agents/skills`, `.claude/skills`
-or `.codex/skills` — never a hardcoded path): the current repo when no repository is given, the
-branch-seen tickets (else the single newest commit ticket) when none are named. Tags stay
-agent-derived from the dump's own keywords. An explicit caller value always wins.
+Initialize is tool-free like the rest of the default session: do not run the metadata reporter here
+(see **Bindings** under Synthesize On Request).
 
 ### 2. Listen
 
@@ -122,10 +119,28 @@ Only when the user asks to update/create/synthesize an artifact:
   answered (or once the user says to proceed regardless). In the default no-switch mode, skip this and
   surface open questions inside the artifact instead.
 - Confirm the target if multiple were mentioned.
+- Resolve bindings (below) before writing any repository or ticket into the artifact.
 - Use the accumulated context and any final decisions.
+- **Before the artifact is written**, mask secrets as `<REDACTED>` and remove or generalise every
+  personal identifier — names, emails, account names, identity numbers — to a role or type ("the
+  reviewer", "an identity number") until no one can be singled out. Never copy unprocessed braindump
+  content into a repository file or ticket: a file deleted or edited afterwards was still written.
 - Produce the requested artifact directly: issue description, ADR, worktask, PR body, implementation checklist, acceptance criteria, etc.
 - Preserve decisions and non-goals explicitly.
 - Include open questions only when still unresolved.
+
+**Bindings.** When a repository or ticket binding is missing, the sibling
+`mimisbrunnr-heimdallr-find-session-metadata` reporter (offline git scan under the same skills root —
+`.agents/skills`, `.claude/skills` or `.codex/skills` — never a hardcoded path) may supply candidates.
+Run it no earlier than this phase, or during Listen only when `--oktoreaddocs` / `--all` has enabled
+grounding — it reads git, and the default session is tool-free.
+
+- The current repo may fill a missing repository.
+- A ticket the reporter finds — branch-seen, or in a commit subject — is a **suggestion**, not a
+  binding: list each with where it was seen and ask the operator to confirm or pick before it appears
+  in an artifact. A branch name or commit message can belong to other work; no answer means unbound,
+  not the newest ticket.
+- Tags stay agent-derived from the dump's own keywords. An explicit caller value always wins.
 
 If the user asks to update a live ticket or file, perform the update with the appropriate tool and report the exact target changed.
 

@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using SmoothAiProductContextMemory.Application.Abstractions;
@@ -46,14 +47,14 @@ public sealed class NpgsqlRecallFeedbackQuery(
             connection);
 
         command.Parameters.AddWithValue(
-            "grace_cutoff", PostgresInstant.ToUtc(request.AsOf.AddDays(-RecentlyCapturedGraceDays)));
+            "grace_cutoff", request.AsOf.Plus(Duration.FromDays(-RecentlyCapturedGraceDays)));
         command.Parameters.AddWithValue("purpose", request.RecallPurpose ?? RecallPurpose.DirectRetrieval);
 
         var rows = new List<NeverRecalledRow>();
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            rows.Add(new NeverRecalledRow(reader.GetGuid(0), reader.GetFieldValue<DateTimeOffset>(1)));
+            rows.Add(new NeverRecalledRow(reader.GetGuid(0), reader.GetFieldValue<Instant>(1)));
         }
 
         return rows;
@@ -83,8 +84,8 @@ public sealed class NpgsqlRecallFeedbackQuery(
              """,
             connection);
 
-        command.Parameters.AddWithValue("from", PostgresInstant.ToUtc(request.From));
-        command.Parameters.AddWithValue("to", PostgresInstant.ToUtc(request.To));
+        command.Parameters.AddWithValue("from", request.From);
+        command.Parameters.AddWithValue("to", request.To);
         command.Parameters.AddWithValue("purpose", request.RecallPurpose ?? RecallPurpose.DirectRetrieval);
 
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);

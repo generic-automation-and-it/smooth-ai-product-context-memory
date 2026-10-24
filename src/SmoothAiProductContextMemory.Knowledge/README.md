@@ -39,3 +39,35 @@ Both modes use the same direct-skill `redact.py` source. The host packages that 
 The same `atomicity.py` source is packaged and enforced on initial extraction and any repaired extraction. Shared direct/service fixtures preserve necessary conditions and exceptions as one meaningful claim while rejecting independent bundled claims. A rejected extraction may receive one bounded stronger review, then must pass the same detector again.
 
 Each context response uses one request UUID across internal searches with `recallPurpose=service_retrieval`. Capture comparison uses the durable capture UUID with `recallPurpose=capture_comparison`. Direct core retrieval remains separately attributed. Core-pass counts retain their original meaning; caller-request aggregation is an additional metric.
+
+## Compatibility with main (October 24, 2026)
+
+This branch incorporates main through `a5807dc`, including UTC `Instant` timestamps,
+product/initiative/repository graph links, ticket references, and unchanged-write
+results. Evidence-only changes still create a version. Product and ticket-reference
+writes advance the corpus revision under the same transaction lock as service
+commits; AGE Cypher mutations need an explicit revision advance in addition to SQL
+triggers. Reader contracts retain main's new graph metadata.
+
+The packaged detector paths now use `_mimisbrunnr-shared/scripts`. Snapshot format
+6 includes both main's complete graph and operation receipts. Main's format 5 is
+readable with no operation receipts; older formats 3/4 are refused. The previous
+feature branch's format 4 is a different layout from main's format 4. Preserve old
+backups and use a separately reviewed conversion; changing a manifest version is
+not a migration.
+
+Before upgrading an existing installation, stop accepting new captures, drain or
+account for pending work with the old version, and back up the core database and
+capture journal together. Core canonical request hashing changed with the UTC
+and request-shape migration. `knowledge-v2` holds old pending `knowledge-v1` jobs
+with `workflow_version_changed`, preserving their input rather than replaying
+writes. Same-epoch journal migration is not implemented: unresolved jobs require
+explicit reconciliation against existing operation receipts before a separately
+reviewed migration. Do not edit version markers or resubmit blindly. The restore
+reconciliation endpoint is for actual corpus restore/epoch changes.
+
+Local validation: Windows and Linux Release builds; real PostgreSQL/AGE and MinIO
+corpus-boundary tests; knowledge-service unit tests with fake providers; snapshot
+archive and evidence-equality tests; shared atomicity fixtures; Linux service image
+build and disabled-host smoke check. These checks do not constitute deployment or
+live-provider acceptance. Production data, credentials and services were not used.

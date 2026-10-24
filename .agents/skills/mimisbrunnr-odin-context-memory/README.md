@@ -3,9 +3,10 @@
 | Switch | Cost impact | Why |
 |--------|-------------|-----|
 | _(none)_ | **Baseline** | Silent capture; write only at checkpoint; no approval override. |
-| `--dryrun` | **Same as a real write** | Full pipeline, no persistence. Costs the LLM judgements but writes nothing. The **only** pre-write inspection point — a plain `set`'s digest arrives after the transaction has committed. |
+| `--dryrun` | **Judgement cost; set stage only when the `groupUuid` is known** | No memory, link, group or initiative persisted; its recall queries still leave server-side recall feedback (HLD-004 LADR-01). For an existing group that **already holds memories** — the only case a read-only ticket query returns its `groupUuid` — the full pipeline runs through `set --dryrun`, the **only** pre-write inspection point, since a plain `set`'s digest arrives after the transaction has committed. A group that does not exist yet, or exists with no memories, has no read-only `groupUuid`, so its dry run previews the plan offline and cannot test the set stage. |
 | `--approve` | **No extra cost, narrower gate** | Writes `rule`/`nfr`/`decision` as `approved` rather than `proposed`. Saves a human round-trip at the cost of canon becoming citable without review — the "ask about what is not reversible" rule. Without it the fact is still stored, just not yet citable. |
-| `--deepsearch` | **Bounded opt-in** | Adds four keyword passes of 25 and five depth-one traversals of 20, capped at 400 unique UUID/version candidates. Reports saturation and possible omissions. |
+| `--deepsearch` | **Bounded opt-in** | Adds four keyword passes of 25 and five depth-one traversals of 20, capped at 400 unique UUID/version candidates. Reports saturation and possible omissions. Under a group/ticket selector it never returns another group's endpoints, and a refused (403) anchor is reported rather than failing the recall. |
+| `--product-name <NAME>` | **One extra write, after the memories** | Declares the product's graph edge for the anchor the binding names — `(Product)-[:HAS_INITIATIVE]->(Initiative)`, or `(Product)-[:HAS_REPO]->(Repo)` when no initiative is bound. A second write, not part of the `set` transaction: an edge that fails leaves the memories written and is reported as a failed checkpoint step. The product must already be registered; nothing is created implicitly. Caller-supplied only — the git scan reports repository, tickets and initiative, never a product. |
 
 **Bottom line:** writes are expensive by design (R13) and cheap by default for reads. The skill's value
 is not that it is cheap — it is that it is the *only* way to make real, long-lived memory, and it makes
@@ -30,13 +31,13 @@ version bump, a divergent claim, or a skip.
 
 It has 4 phases:
 
-1. **Initialize** (resolve the group from ticket/repo/initiative/scope)
+1. **Initialize** (propose the group binding from ticket/repo/initiative/scope — read-only; the group is created only at the `--export` checkpoint)
 2. **Listen** (accumulate candidates silently, never write)
 3. **Compare-or-Clarify** (the bounded pre-write round: within-group dedup + cross-group link derivation + ticket-uniqueness)
-4. **Write** (the explicit `set` checkpoint)
+4. **Export** (the explicit `--export` checkpoint, which runs `set`; the capture client accepts `export`/`import` as aliases of `set`/`query`, while the read-only client accepts `import` only)
 
 …plus a fixed five-stage write pipeline (preflight → redact → dedupe/derive-links → atomicity → write)
-and a retrieval (`get`) path that returns cheap fields by default and touches the blob only on drill-down.
+and a recall (`--import`) path that returns cheap fields by default and touches the blob only on drill-down.
 Phase 3 above **is** pipeline stage 1 — the phases and the stages overlap rather than nest, which is why
 the pipeline table in `SKILL.md` is the canonical numbering.
 
@@ -57,13 +58,13 @@ and exposed token counts separately.
   on harness batching and cannot be inferred from fact count.
 - **Semantic dedup and link derivation are LLM judgements** on the pre-write round. Narrowed by
   facet/kind to a bounded top-N first, so the judgement is over candidates, not the whole store.
-- **`--dryrun` costs the same as a real write** (same pipeline, no persistence). It is the inspection
+- **`--dryrun` pays the judgement cost** (same pipeline, no persistence; for a new group, no set stage). It is the inspection
   cost, deliberately — it buys confidence that a non-trivial batch is right before committing.
 
 ### Where it saves
 
-- **Retrieval is bounded by default.** `memory-read` consumes candidate rows in isolated context and
-  returns cited conclusions plus omission disclosure; blobs remain drill-down only.
+- **Retrieval is bounded by default.** The read path reduces candidate rows to cited conclusions plus
+  omission disclosure before they are used; blobs remain drill-down only.
 - **It replaces ossified prompt re-explanation.** The cost that recurs every session is re-explaining
   context to a stateless model. A retrieved memory carries the reasoning forward without re-derivation.
   This is the amortized saving — paid at write, recovered across many reads.
@@ -76,7 +77,7 @@ and exposed token counts separately.
 
 ### Where it does *not* save — the caveat
 
-- **Aggregate token spend may rise.** Read and write agents each establish context. Gain is main-context
+- **Aggregate token spend may rise.** Read and write paths each establish context. Gain is main-context
   longevity and enforced read capability, not guaranteed lower total tokens.
 
 - **A wrong dedup decision is expensive and silent.** If the skill misses a semantic match, it writes a

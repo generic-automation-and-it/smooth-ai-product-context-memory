@@ -1,0 +1,296 @@
+{
+  "$schema_note": "On-demand LLM-eval fixtures for the mimisbrunnr-odin-context-memory semantic/atomicity stages. Each scenario carries a candidate, a fixed recall set, and an independently-authored EXPECTED verdict. Scored for recall AND precision against the expected set, never derived from the rules (the anti-pattern run-trial.js fell into). Not CI-gated; run on demand via score_fixtures.py.",
+  "scenarios": [
+    {
+      "id": "s1-redact-planted-credential",
+      "stage": "redact",
+      "axis": "not_dedup",
+      "candidate_description": "Deployment uses AKIAIOSFODNN7EXAMPLE for the build pipeline.",
+      "candidate_statement": "The CI pipeline authenticates with an AWS access key.",
+      "expected": {
+        "verdict": "scrub",
+        "must_not_contain": [
+          "AKIAIOSFODNN7EXAMPLE"
+        ],
+        "reason": "secret redacted before blob write"
+      }
+    },
+    {
+      "id": "s2-same-subject-version-bump",
+      "stage": "dedup",
+      "axis": "recall_positive",
+      "candidate_description": "PostgreSQL is the storage engine we use for memories.",
+      "candidate_statement": "We store in Postgres.",
+      "recall_set": [
+        {
+          "uuid": "m-001",
+          "group_uuid": "g-01",
+          "description": "We store in Postgres",
+          "statement": "PostgreSQL is the storage engine.",
+          "kind": "architecture",
+          "content_summary": "Postgres is the chosen storage engine."
+        }
+      ],
+      "expected": {
+        "verdict": "version_bump",
+        "target_uuid": "m-001",
+        "reason": "same subject, different wording, not a new memory"
+      }
+    },
+    {
+      "id": "s3-bundled-split-counted",
+      "stage": "atomicity",
+      "axis": "not_dedup",
+      "candidate_description": "We chose PostgreSQL, and it also explains why we need JSONB, but it further means the index is GIN.",
+      "candidate_statement": "Postgres, JSONB and GIN are connected decisions.",
+      "expected": {
+        "verdict": "split",
+        "count": 3,
+        "reason": "three atomic facts bundled into one record"
+      }
+    },
+    {
+      "id": "s4-cross-group-match-is-not-a-bump",
+      "stage": "dedup",
+      "axis": "precision_negative",
+      "candidate_description": "A memory is one atomic fact with four content fields.",
+      "candidate_statement": "Each memory is a single atomic fact.",
+      "recall_set": [
+        {
+          "uuid": "m-002",
+          "group_uuid": "g-99",
+          "description": "A memory is one atomic fact with four content fields",
+          "statement": "Each memory carries four content fields.",
+          "kind": "domain-model",
+          "content_summary": "Memory is a single atomic fact."
+        }
+      ],
+      "expected": {
+        "verdict": "new_memory",
+        "reason": "same subject, but the match is in another group: identity is (group, uuid), so a foreign uuid target is a 404. Capture a new memory here and derive a typed link to the twin rather than a version bump."
+      }
+    },
+    {
+      "id": "s5-link-derivation",
+      "stage": "links",
+      "axis": "not_dedup",
+      "candidate_description": "The memory service is local-first and private to our workspace.",
+      "candidate_statement": "Storage is local-first.",
+      "recall_set": [
+        {
+          "uuid": "m-003",
+          "group_uuid": "g-01",
+          "description": "The memory service is local-first and private to our workspace",
+          "statement": "The service is local-first.",
+          "kind": "positioning",
+          "content_summary": "Local-first, private service."
+        }
+      ],
+      "expected": {
+        "verdict": "link",
+        "relation": "relates_to",
+        "link_uuid": "m-003",
+        "reason": "a reason must be supplied",
+        "reason_must_be_nonempty": true
+      }
+    },
+    {
+      "id": "s6-programme-scoped-not-product",
+      "stage": "scope",
+      "axis": "not_dedup",
+      "candidate_description": "The programme requires monthly reporting.",
+      "candidate_statement": "Programme-level knowledge must not be cited as shipped product behaviour.",
+      "expected": {
+        "verdict": "set_scope_program",
+        "not_product_fact": true,
+        "reason": "programme scope, not product behaviour"
+      }
+    },
+    {
+      "id": "s7-adversarial-divergence",
+      "stage": "divergence",
+      "axis": "not_dedup",
+      "candidate_description": "The storage engine will be SQLite.",
+      "candidate_statement": "We decided to use SQLite for persistence.",
+      "recall_set": [
+        {
+          "uuid": "m-004",
+          "group_uuid": "g-01",
+          "description": "Storage engine is PostgreSQL",
+          "statement": "We use PostgreSQL for storage.",
+          "kind": "storage",
+          "content_summary": "PostgreSQL stores our data."
+        }
+      ],
+      "expected": {
+        "verdict": "genuine_conflict",
+        "diverged": 1,
+        "reason": "same-scope conflicting claims; no stated authority selects a winner"
+      },
+      "note": "Design reversal metadata is intentionally absent; create one proposed divergence and two contradiction links."
+    },
+    {
+      "id": "s8-near-miss-negative",
+      "stage": "dedup",
+      "axis": "precision_negative",
+      "candidate_description": "Postgres stores our search index.",
+      "candidate_statement": "The search index lives in Postgres.",
+      "recall_set": [
+        {
+          "uuid": "m-001",
+          "group_uuid": "g-01",
+          "description": "PostgreSQL is the storage engine",
+          "statement": "We store in Postgres.",
+          "kind": "architecture",
+          "content_summary": "Postgres is the storage engine."
+        }
+      ],
+      "expected": {
+        "verdict": "new_memory",
+        "reason": "different claim: index storage vs chosen storage engine; must NOT dedup"
+      },
+      "note": "Negative control \u2014 near-miss must not collapse into a version bump."
+    },
+    {
+      "id": "s9-authority-shipped-behaviour",
+      "stage": "divergence",
+      "axis": "not_dedup",
+      "candidate_description": "The API contract says links are written later.",
+      "candidate_statement": "The accepted specification permits a follow-up link call.",
+      "recall_set": [
+        {
+          "uuid": "m-005",
+          "group_uuid": "g-01",
+          "description": "Transactional link behavior",
+          "statement": "The shipped API commits links with memories.",
+          "kind": "behavior",
+          "content_summary": "Executable evidence confirms one transaction.",
+          "sources": [
+            {
+              "kind": "test",
+              "reference": "SetMemoriesHandlerTests"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "verdict": "authority_resolved",
+        "diverged": 0,
+        "authority": "shipped_behavior",
+        "reason": "verified shipped behavior outranks specification for current behavior"
+      }
+    },
+    {
+      "id": "s10-authority-agreed-vocabulary",
+      "stage": "divergence",
+      "axis": "not_dedup",
+      "candidate_description": "A stored fact should be called a note.",
+      "candidate_statement": "Use note as the canonical term.",
+      "recall_set": [
+        {
+          "uuid": "m-006",
+          "group_uuid": "g-01",
+          "description": "Context memory glossary",
+          "statement": "The agreed term is Context.",
+          "kind": "glossary",
+          "content_summary": "Context is the approved vocabulary."
+        }
+      ],
+      "expected": {
+        "verdict": "authority_resolved",
+        "diverged": 0,
+        "authority": "agreed_vocabulary",
+        "reason": "agreed vocabulary outranks incidental terminology"
+      }
+    },
+    {
+      "id": "s11-token-expiry-negative",
+      "stage": "dedup",
+      "axis": "precision_negative",
+      "candidate_description": "Auth issues tokens with a one-hour expiry.",
+      "candidate_statement": "Access tokens are valid for one hour.",
+      "recall_set": [
+        {
+          "uuid": "m-007",
+          "group_uuid": "g-01",
+          "description": "Auth uses a revocable session cookie",
+          "statement": "Auth issues a revocable session cookie.",
+          "kind": "architecture",
+          "content_summary": "Sessions are revocable server-side cookies."
+        }
+      ],
+      "expected": {
+        "verdict": "new_memory",
+        "reason": "same domain and vocabulary, different claim: token lifetime vs session mechanism. NFR-02's own example pair. Must NOT version."
+      },
+      "note": "Negative control \u2014 the worked example from NFR-02, same group so the only thing separating them is the claim."
+    },
+    {
+      "id": "s12-same-words-different-scope-negative",
+      "stage": "dedup",
+      "axis": "precision_negative",
+      "candidate_description": "The nightly export job runs at 02:00 UTC.",
+      "candidate_statement": "The nightly export starts at 02:00 UTC.",
+      "recall_set": [
+        {
+          "uuid": "m-008",
+          "group_uuid": "g-01",
+          "description": "The nightly export job runs at 02:00 UTC",
+          "statement": "The nightly export starts at 03:00 UTC.",
+          "kind": "operations",
+          "content_summary": "Export schedule is 03:00 UTC."
+        }
+      ],
+      "expected": {
+        "verdict": "new_memory",
+        "reason": "an identical subject with a contradicted detail is a genuine conflict, not a restatement: versioning would silently overwrite 03:00 with 02:00. Expected verdict is new_memory only because this pair is scored on the matching axis; the divergence stage is what surfaces the contradiction."
+      },
+      "note": "Negative control \u2014 surface-identical pair whose only difference is the value. The hardest shape for a matcher that keys on wording."
+    },
+    {
+      "id": "s13-superseded-facet-negative",
+      "stage": "dedup",
+      "axis": "precision_negative",
+      "candidate_description": "The Host exposes the query endpoint at POST /api/context/query.",
+      "candidate_statement": "Recall is served by POST /api/context/query.",
+      "recall_set": [
+        {
+          "uuid": "m-009",
+          "group_uuid": "g-01",
+          "description": "Recall is served by POST /api/context/recall",
+          "statement": "Recall is served by POST /api/context/recall.",
+          "kind": "api",
+          "content_summary": "The recall route is /api/context/recall."
+        }
+      ],
+      "expected": {
+        "verdict": "new_memory",
+        "reason": "same subject, same method, different route. The claim is about a specific path, so a differing path is a differing claim. Must NOT version."
+      },
+      "note": "Negative control \u2014 one token apart, which is exactly where a string heuristic over-merges."
+    },
+    {
+      "id": "s14-same-subject-paraphrase-positive",
+      "stage": "dedup",
+      "axis": "recall_positive",
+      "candidate_description": "Blob bodies are addressed by a content hash.",
+      "candidate_statement": "We address blob bodies by their content hash.",
+      "recall_set": [
+        {
+          "uuid": "m-010",
+          "group_uuid": "g-01",
+          "description": "Blob bodies are addressed by a content hash",
+          "statement": "Content addressing: a blob's key is derived from its bytes.",
+          "kind": "architecture",
+          "content_summary": "Blobs are content-addressed by hash."
+        }
+      ],
+      "expected": {
+        "verdict": "version_bump",
+        "target_uuid": "m-010",
+        "reason": "same subject, one clause reworded, no change of claim. Must version \u2014 this is the recall axis, and a matcher that misses it fills the store with duplicates."
+      },
+      "note": "Recall positive \u2014 a second positive so recall does not rest on a single scenario."
+    }
+  ]
+}

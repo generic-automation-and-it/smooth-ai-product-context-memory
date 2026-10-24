@@ -2,34 +2,23 @@
 
 Self-contained skills for Claude Code, GitHub Copilot, and OpenAI Codex providing specialized workflows and tools.
 
-Skills live **flat**, one directory per skill directly under `.agents/skills/`. Each folder name is **category-prefixed** (`agile-`, `ai-`, `context-`, `git-`, `mimisbrunnr-`) so the listing groups by category when sorted. The prefix is the only grouping mechanism — there are no category subfolders (Claude Code discovers skills exactly one level under `.claude/skills/`).
+Skills live **flat**, one directory per skill directly under `.agents/skills/`. Each folder name is **category-prefixed** (`ai-`, `mimisbrunnr-`) so the listing groups by category when sorted. The prefix is the only grouping mechanism — there are no category subfolders (Claude Code discovers skills exactly one level under `.claude/skills/`).
+
+The one folder here that is **not** a skill is `_mimisbrunnr-shared/`: it holds the scripts used by more than one `mimisbrunnr-*` skill and carries no `SKILL.md`, so no loader lists it and it has no slash command. A `mimisbrunnr-*` skill references it by path; no skill reaches into a peer skill's folder ([`_mimisbrunnr-shared/AGENTS.md`](_mimisbrunnr-shared/AGENTS.md), [HLD-010](../docs/hlds/010-skills-distribution/)).
 
 ## Quick Reference
 
 | Skill | Purpose | Usage |
 |-------|---------|-------|
-| **agile-github-breakdown** | Turn a braindump or existing Feature into GitHub Feature + Task issues | `/agile-github-breakdown` |
-| **agile-github-task-from-diff** | Create a GitHub Task (sub-issue) from the current git diff vs main | `/agile-github-task-from-diff [--feature-issue <n> \| --noparentid]` |
 | **mimisbrunnr-vitsmunir-dump** | AI Brain / Intelligence Dump — listen-first capture; synthesize on request. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension. | `/mimisbrunnr-vitsmunir-dump [--oktoask] [--thinking] [--oktoreaddocs] [--oktowebsearch] [--all]` |
-| **ai-review** | Analyze and execute AI PR review feedback (fix/skip) | `/ai-review <pr> [1=fix 2=skip …]` |
-| **ai-terse** | Reformat this turn's reply into terse, high-density output with a TL;DR | `/ai-terse` |
-| **ai-template-sync** | UPSERT smooth-devex-template scaffold into an existing repo | `/ai-template-sync` |
-| **context-load-agents-context** | Load ancestor AGENTS.md context for a file | `/context-load-agents-context` |
-| **context-load-context** | Load domain context before implementation | `/context-load-context auth` |
 | **mimisbrunnr-odin-context-memory** | Get/set persistent context-memory records; sole authority on the write path to the store | `/mimisbrunnr-odin-context-memory [--dryrun] [--approve]` |
 | **mimisbrunnr-saga-dossier** | Compose a read-only, cited context dossier for a slice of the store — document plus findings, no write capability | `/mimisbrunnr-saga-dossier` |
-| **mimisbrunnr-kvasir-understanding** | Load an Understanding export (or prior material) into agent context; `--store` funnels an import back through the capture path | `/mimisbrunnr-kvasir-understanding [--store] [--currentsession] [--all]` |
+| **mimisbrunnr-kvasir-understanding** | Load an Understanding export (or prior material) into agent context; `import` recalls from the store, `export` sends session material through the capture path (`--dryrun` previews), `dump --currentsession` writes the session to a local folder | `/mimisbrunnr-kvasir-understanding load\|import\|export\|dump [--dryrun] [--all]` |
 | **mimisbrunnr-heimdallr-find-session-metadata** | Scan the current session for tickets, repository and initiative; print to console — Heimdallr watches, the operator binds | `/mimisbrunnr-heimdallr-find-session-metadata [--json] [--initiative NAME]` |
 | **mimisbrunnr-muninn-recall-feedback** | Run the three recall-feedback tuning queries — never-recalled list, miss rate over a window, baseline reset | `/mimisbrunnr-muninn-recall-feedback` |
 | **ai-understanding** | Export this session's hard-won knowledge as Understandings; import, publish and consume the store | `/ai-understanding [--export] [--import] [--publish] [--consume <zip>]` |
+| **ai-memory-context** | Local-first memory store — Odin's capture pipeline writing to `.context/context-memories/`, no server and no network, so it ships as one zip | `/ai-memory-context [--export] [--dryrun] [--all] [--review]` |
 | **mimisbrunnr-ymir-bootstrap** | Build a cited, reviewable durable-context baseline for one existing project, optionally focused on its next feature. Ymir is the first being of Norse myth, from whose body the gods shaped the world — as this baseline is shaped from the repository that already exists. | `/mimisbrunnr-ymir-bootstrap <repository> [next-feature focus]` |
-| **create-hld** | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` | `/create-hld <kebab-slug>` |
-| **git-commit** | Commit with conventional format | `/git-commit [--autonomous]` |
-| **git-commit-push** | Commit and push to remote | `/git-commit-push [--autonomous]` |
-| **git-commit-push-pr** | Commit, push, and create/update PR | `/git-commit-push-pr [--autonomous]` |
-| **git-commit-review-push** | Commit, push, and embed `/ai-review` trigger for a full AI review | `/git-commit-review-push [--issue <n>]` |
-| **git-sync** | Sync with main (optionally auto-resolve conflicts) | `/git-sync` |
-| **manage-rule-system** | Create/update rule files in `.agents/rules/` | `/manage-rule-system` |
 
 ### mimisbrunnr-vitsmunir-dump switches
 
@@ -77,17 +66,6 @@ zero mutations overall. When the workers are unavailable, the skill reports thos
 and stops with the preview; it never falls back to a direct client or claims that the baseline was stored
 or verified.
 
-### git-commit / git-commit-push / git-commit-push-pr switches
-
-The `--autonomous` switch suppresses all interactive questions across the entire commit chain. When passed, the agent uses its best judgment on commit grouping, message selection, and PR title — it never stops to ask.
-
-| Switch | Effect |
-|--------|--------|
-| _(none)_ | Default — ask for clarification when grouping is unclear or a conforming message cannot be determined |
-| `--autonomous` | **No questions asked.** Agent decides everything autonomously and proceeds without confirmation |
-
-`--autonomous` is forwarded automatically through the skill chain: `git-commit-push-pr` → `git-commit-push` → `git-commit`.
-
 ## Effort
 
 Skills never pick a model, and never differ per provider — every skill runs on whatever model the session already uses. Each SKILL.md instead carries a single `effort` frontmatter field on the standard AI-harness reasoning-effort scale:
@@ -102,38 +80,19 @@ Skills never pick a model, and never differ per provider — every skill runs on
 
 A harness that honours skill `effort` applies it on invocation; a harness with a coarser scale uses its nearest supported level. When a skill invokes another skill as a sub-agent, run it at the **callee's** `effort` on the session's model. `effort` governs the agent that *drives* a skill — the models the review gate itself calls are chosen separately by its GitHub Variables (`OPENCODE_REVIEW_REPORT_MODEL_*`, see `docs/wiki/ci.md`).
 
-Two parents own most skills here, and their SKILL.md files are kept byte-identical to them: `smooth-devex-template` (the `agile-`, `context-`, `git-commit`/`git-commit-push`/`git-commit-push-pr`/`git-sync`, `ai-terse`/`ai-template-sync`, `create-hld`, `manage-rule-system` and `mimisbrunnr-vitsmunir-dump` ← `ai-brain-dump` skills) and `smooth-ai-report-review` (`ai-review`, `git-commit-review-push`). `ai-understanding` is template-owned but carries accepted local divergences recorded in `.agents/skills/ai-understanding/AGENTS.md`'s changelog, so `ai-template-sync` would revert them. The `mimisbrunnr-` context-memory skills are owned by this repo.
+One parent owns some skills here, and their SKILL.md files are kept byte-identical to it: `smooth-devex-template` (`mimisbrunnr-vitsmunir-dump` ← `ai-brain-dump`). `ai-understanding` is template-owned but carries accepted local divergences recorded in `.agents/skills/ai-understanding/AGENTS.md`'s changelog, so a template sync would revert them. The `mimisbrunnr-` context-memory skills are owned by this repo.
 
 ### Skill effort levels
 
 | Skill | Effort | Rationale |
 |-------|--------|-----------|
-| **context-load-context** | low | File discovery and loading; no deep reasoning |
-| **context-load-agents-context** | low | Script-driven file traversal; no deep reasoning |
-| **git-commit** | low | Diff review + conventional commit; straightforward |
-| **git-commit-review-push** | low | Mechanical git plumbing — but it still asks when unclear and double-checks before pushing (`smooth-ai-report-review`) |
-| **git-sync** | medium | Default path is script-only, but `--fix` resolves merge conflicts by merging the intent of both sides — the effort must cover the heaviest mode |
-| **ai-terse** | medium | Not mechanical reformatting: decides what is signal, compresses without changing meaning, and judges Holes/Ignored for the TL;DR |
-| **git-commit-push** | medium | Branch rename logic + upstream tracking |
-| **git-commit-push-pr** | medium | PR template authoring + state management |
-| **agile-github-task-from-diff** | medium | Diff classification + issue authoring |
-| **manage-rule-system** | medium | Cross-tool frontmatter authoring |
-| **ai-template-sync** | medium | `sync.sh` does the copy/compare; the agent only picks flags, runs the rules-layout pre-flight and builds the conflict table |
-| **mimisbrunnr-vitsmunir-dump** | medium | Listen-first capture — `high` would be re-paid on every turn of a long session. Deep reasoning happens downstream, in the skills its output feeds (`ai-understanding`, `agile-github-breakdown`, `create-hld`) |
+| **mimisbrunnr-vitsmunir-dump** | medium | Listen-first capture — `high` would be re-paid on every turn of a long session. Deep reasoning happens downstream, in the skills its output feeds (`ai-understanding`, `ai-memory-context`) |
 | **mimisbrunnr-muninn-recall-feedback** | medium | Three fixed recall-feedback API queries plus interpretation |
-| **ai-review** | high | Review analysis, fix/skip judgment + multi-file code fixes (`smooth-ai-report-review`) |
 | **ai-understanding** | high | Judging what qualifies as transferable knowledge + merge/promotion decisions |
 | **mimisbrunnr-saga-dossier** | high | Equivalence, contradiction and gap judgement across a whole store slice |
 | **mimisbrunnr-kvasir-understanding** | high | Judgement on understanding vs scoped fact, and capture-path funneling |
-| **agile-github-breakdown** | xhigh | Multi-turn FR/NFR → Task graph + GitHub writes |
-| **create-hld** | xhigh | Multi-turn clarification gates + architectural judgment (LADRs, NFRs, diagrams) |
 | **mimisbrunnr-ymir-bootstrap** | xhigh | Source-backed baseline the store's later sessions build on: consequential questioning, conflict preservation and reviewed candidate selection require product judgement |
 | **mimisbrunnr-odin-context-memory** | xhigh | Sole write path to the store every later session builds on: group-scoped semantic versioning, cross-group twin linking, atomicity splitting and summary/keyword generation |
-
-### Sub-skill invocation
-
-- **git-commit-push** → invokes **git-commit** at `effort: low`
-- **git-commit-push-pr** → invokes **git-commit-push** at `effort: medium`
 
 ### Frontmatter shape
 
@@ -150,22 +109,18 @@ effort: <low|medium|high|xhigh>  # one-line rationale
 ---
 ```
 
-The two `smooth-ai-report-review` skills keep that parent's shape verbatim — `ai-review` also carries a `switches:` list, and both align the rationale comment to a column.
-
 ## Naming & Ordering
 
 Skills are flat under `.agents/skills/`; the category lives in the folder-name prefix so a sorted listing groups by category:
 
 | Prefix | Skills |
 |--------|--------|
-| `agile-` | `agile-github-breakdown`, `agile-github-task-from-diff` |
-| `ai-` | `ai-review`, `ai-terse`, `ai-template-sync`, `ai-understanding` |
-| `context-` | `context-load-agents-context`, `context-load-context` |
+| `ai-` | `ai-brain-dump`, `ai-understanding`, `ai-memory-context` |
 | `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-ymir-bootstrap`, `mimisbrunnr-odin-context-memory`, `mimisbrunnr-saga-dossier`, `mimisbrunnr-muninn-recall-feedback`, `mimisbrunnr-kvasir-understanding` |
-| `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-commit-review-push`, `git-sync` |
-| _(none)_ | `create-hld`, `manage-rule-system` |
 
 A skill's folder name MUST equal its `name:` frontmatter (this is the slash-command name). When adding a skill, pick the prefix of its category and keep the folder one level under `.agents/skills/`.
+
+`_mimisbrunnr-shared/` appears in no row of the table above and must never gain one: it has no `name:`, no `SKILL.md` and no slash command.
 
 ## About Skills
 

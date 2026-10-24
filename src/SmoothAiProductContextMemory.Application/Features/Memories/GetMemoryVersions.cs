@@ -2,6 +2,7 @@ using FluentValidation;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
@@ -25,7 +26,10 @@ public static class GetMemoryVersions
         }
     }
 
-    public sealed class Handler(IApplicationDbContext db, ILogger<Handler> logger) : IRequestHandler<Request, Response>
+    public sealed class Handler(
+        IApplicationDbContext db,
+        IMemoryGraph graph,
+        ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
@@ -46,13 +50,20 @@ public static class GetMemoryVersions
                     $"This memory is '{dimension}'-scoped. Request it with scope '{dimension}' to read it.");
             }
 
+            MemoryGroup group = memory.Group!;
+            string? initiativeName = await db.Initiatives
+                .AsNoTracking()
+                .Where(i => i.Id == group.InitiativeId)
+                .Select(i => i.Name)
+                .SingleOrDefaultAsync(cancellationToken);
+
             List<CheapMemory> items =
             [
                 .. memory.Versions
                     .OrderBy(v => v.Version)
                     .Select(v => new CheapMemory(
                         memory.Uuid,
-                        memory.Group!.Uuid,
+                        group.Uuid,
                         memory.Name,
                         memory.Description,
                         v.Statement,
@@ -62,19 +73,27 @@ public static class GetMemoryVersions
                         memory.Tags,
                         v.Status,
                         v.Confidence,
-                        memory.Group.ScopeDimension,
-                        memory.Group.ScopeIdentifier,
+                        group.ScopeDimension,
+                        group.ScopeIdentifier,
                         v.ValidFrom,
                         v.ValidUntil,
                         v.Version,
                         v.IsCurrent,
                         v.Sources,
                         v.CreatedOn,
-                        v.BlobAddress != null))
+                        v.BlobAddress != null)
+                    {
+                        Repository = group.Repo,
+                        InitiativeName = initiativeName,
+                    })
             ];
 
-            logger.LogInformation("Get memory versions completed. Count: {Count}", items.Count);
-            return new Response(items);
+            // Same assembly as the query path, so a version row and a list row never disagree about a
+            // memory's binding.
+            IReadOnlyList<CheapMemory> enriched = await TicketIdentityLookup.EnrichAsync(db, graph, items, cancellationToken);
+
+            logger.LogInformation("Get memory versions completed. Count: {Count}", enriched.Count);
+            return new Response(enriched);
         }
     }
 }

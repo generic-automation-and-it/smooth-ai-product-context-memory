@@ -11,6 +11,13 @@ internal static class AgeSession
     internal const string GraphName = "memory_graph";
     internal const string VertexLabel = "Memory";
     internal const string EdgeLabel = "LINKS";
+    internal const string TicketLabel = "Ticket";
+    internal const string AboutEdgeLabel = "ABOUT";
+    internal const string ProductLabel = "Product";
+    internal const string InitiativeLabel = "Initiative";
+    internal const string RepoLabel = "Repo";
+    internal const string HasInitiativeEdgeLabel = "HAS_INITIATIVE";
+    internal const string HasRepoEdgeLabel = "HAS_REPO";
     internal const string ExtensionVersion = "1.7.0";
     internal const int PostgresMajor = 17;
 

@@ -22,7 +22,8 @@ public sealed record ReconciliationAudit(ReconciliationSummary Summary, IReadOnl
 public sealed record RecoveryContext(Guid PreviousCorpusEpoch, Guid ExpectedCorpusEpoch, IReadOnlyList<string> AffectedOperationKeys, IReadOnlyList<string> MissingOperationKeys, string Reason);
 public sealed record EvidenceMetadata(int V, string Category, string? Applicability, string? Authority, string? ScopeDimension, string? ScopeIdentifier, string? AuthorityReference, string? AuthorityQuote);
 public sealed record Source(string Kind, string Reference, DateTimeOffset? CapturedAt, EvidenceMetadata? Evidence = null, int V = 1);
-public sealed record Evidence(Guid Uuid, Guid GroupUuid, int Version, string Name, string Description, string Statement, string ContentSummary, string Kind, string Status, short Confidence, string ScopeDimension, string? ScopeIdentifier, DateTimeOffset ValidFrom, DateTimeOffset? ValidUntil, bool IsCurrent, IReadOnlyList<string> Facets, IReadOnlyList<string> Tags, IReadOnlyList<Source> Sources, DateTimeOffset CreatedOn, string Body = "", bool? HasBody = null);
+public sealed record Evidence(Guid Uuid, Guid GroupUuid, int Version, string Name, string Description, string Statement, string ContentSummary, string Kind, string Status, short Confidence, string ScopeDimension, string? ScopeIdentifier, DateTimeOffset ValidFrom, DateTimeOffset? ValidUntil, bool IsCurrent, IReadOnlyList<string> Facets, IReadOnlyList<string> Tags, IReadOnlyList<Source> Sources, DateTimeOffset CreatedOn, string Body = "", bool? HasBody = null, string? ProductMatch = null, bool SharedInitiative = false, string? TicketMatch = null, IReadOnlyList<TicketBinding>? Tickets = null, string? Repository = null, string? InitiativeName = null);
+public sealed record TicketBinding(string Provider, string Key, string Match);
 public sealed record Coverage(string Question, string Outcome, string Reason);
 public sealed record CitedClaim(string Text, IReadOnlyList<string> Citations, string Conditions, string Lifecycle, string Scope, bool Analysis = false);
 public sealed record Synthesis(IReadOnlyList<CitedClaim> Claims, IReadOnlyList<string> Gaps, IReadOnlyList<string> Conflicts);
@@ -39,8 +40,8 @@ public sealed record Group(Guid Uuid, bool Created, string ScopeDimension, strin
 public sealed record MemoryWrite(Guid? Uuid, string Name, string Description, string Statement, string ContentSummary, string Kind, IReadOnlyList<string> Facets, IReadOnlyList<string> Tags, string Status, short Confidence, string Content, IReadOnlyList<Source> Sources, DateTimeOffset ValidFrom, DateTimeOffset? ValidUntil, string SummaryModel, string SummaryPromptVersion, Guid? CreateUuid, int? ExpectedVersion);
 public sealed record LinkWrite(Guid SourceUuid, Guid TargetUuid, string Relation, string Reason);
 public sealed record CommitRequest(Guid GroupUuid, IReadOnlyList<MemoryWrite> Items, IReadOnlyList<LinkWrite> Links, IReadOnlyList<string> LabelsProposed, bool DryRun, string? OperationKey, Guid? ExpectedCorpusEpoch, long? ExpectedCorpusRevision);
-public sealed record CommitResult(int Created, int Versioned, int Linked, int Diverged, int Skipped, int LabelsProposed, IReadOnlyList<CommitItem> Items);
-public sealed record CommitItem(Guid? Uuid, string? BlobAddress, bool Versioned);
+public sealed record CommitResult(int Created, int Versioned, int Linked, int Diverged, int Skipped, int LabelsProposed, IReadOnlyList<CommitItem> Items, int Unchanged = 0, int TicketReferencesCreated = 0, int TicketReferencesAlreadyPresent = 0, int ProductLinks = 0);
+public sealed record CommitItem(Guid? Uuid, string? BlobAddress, bool Versioned, bool Unchanged = false);
 public sealed record CommittedBatch(string OperationKey, CommitResult Result);
 public sealed record Usage(int Calls = 0, int InputTokens = 0, int OutputTokens = 0, decimal EstimatedDollars = 0, bool Estimated = true, int OutstandingReservations = 0);
 public sealed record BudgetLimits(int Calls = 12, int InputTokens = 100000, int OutputTokens = 12000, decimal Dollars = 2, int DeadlineSeconds = 120);

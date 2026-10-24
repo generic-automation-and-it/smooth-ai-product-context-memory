@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using SmoothAiProductContextMemory.Application.Features.ContextDossier;
@@ -8,6 +10,7 @@ using SmoothAiProductContextMemory.Application.Features.Labels;
 using SmoothAiProductContextMemory.Application.Features.Links;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Application.Features.Preflight;
+using SmoothAiProductContextMemory.Application.Features.ProductNames;
 using SmoothAiProductContextMemory.Application.Features.RecallFeedback;
 using SmoothAiProductContextMemory.Application.Features.Snapshot;
 using SmoothAiProductContextMemory.Application.Features.Tickets;
@@ -41,8 +44,27 @@ internal static class ContextEndpoints
             mediator.Send(body with { DryRun = dryRun || body.DryRun }, ct))
             .RequireCapability(ApiCapability.Write);
 
+        group.MapPost("/memories/ticket-references", (
+            AddTicketReferences.Request body,
+            IMediator mediator,
+            CancellationToken ct) =>
+            mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Write);
+
         group.MapPost("/query", (QueryMemories.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Read);
+
+        // The cheap fields of one memory's current version, by identity. A traversal returns uuid
+        // references for intermediate hops, and the query endpoint has no uuid predicate, so this is the
+        // only read that can label a graph node. It carries the same scope rule as the proxies below:
+        // holding a uuid is not authority to read the dimension the scope rule hides.
+        group.MapGet("/memories/{uuid:guid}", (
+            Guid uuid,
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] string? scope = null) =>
+            mediator.Send(new GetMemory.Request(uuid, scope), ct))
             .RequireCapability(ApiCapability.Read);
 
         group.MapGet("/memories/{uuid:guid}/versions", (
@@ -170,29 +192,104 @@ internal static class ContextEndpoints
             mediator.Send(body, ct))
             .RequireCapability(ApiCapability.Write);
 
+        // Product-name registry (HLD-003 LADR-10). The linking routes are PUT (idempotent), the unlink
+        // is POST (DELETE semantics, D7). Dry run is a query flag that flows into the request the same
+        // way SetMemories does, so the veto is a single source of truth.
+        group.MapGet("/product-names", (IMediator mediator, CancellationToken ct) =>
+            mediator.Send(new GetProductNames.Request(), ct))
+            .RequireCapability(ApiCapability.Read);
+
+        group.MapPost("/product-names", (UpsertProductName.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Write);
+
+        group.MapPut("/product-names/initiatives", (
+            [FromBody] LinkProductInitiative.Request body,
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] bool dryRun = false) =>
+            mediator.Send(body with { DryRun = dryRun || body.DryRun }, ct))
+            .RequireCapability(ApiCapability.Write);
+
+        group.MapPost("/product-names/initiatives/unlink", (
+            [FromBody] UnlinkProductInitiative.Request body,
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] bool dryRun = false) =>
+            mediator.Send(body with { DryRun = dryRun || body.DryRun }, ct))
+            .RequireCapability(ApiCapability.Write);
+
+        group.MapPut("/product-names/repos", (
+            [FromBody] LinkProductRepo.Request body,
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] bool dryRun = false) =>
+            mediator.Send(body with { DryRun = dryRun || body.DryRun }, ct))
+            .RequireCapability(ApiCapability.Write);
+
+        group.MapGet("/product-names/links", (
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] string? productName = null,
+            [FromQuery] string? initiativeName = null) =>
+            mediator.Send(new GetProductLinks.Request(productName, initiativeName), ct))
+            .RequireCapability(ApiCapability.Read);
+
         // Practitioner tuning surface (HLD-004 NFR-03). Consumed occasionally by a human; not the
         // retrieval path, and never pulls raw feedback into retrieval. identity/count/time only.
         group.MapGet("/recall-feedback/never-recalled", (
             IMediator mediator,
             CancellationToken ct,
-            [FromQuery] DateTimeOffset asOf,
+            [FromQuery] string asOf,
             [FromQuery] int? limit = null,
             [FromQuery] string? recallPurpose = null) =>
-            mediator.Send(new GetNeverRecalledMemories.Request(asOf, limit ?? 500, recallPurpose), ct))
+            mediator.Send(new GetNeverRecalledMemories.Request(ParseInstant(asOf), limit ?? 500, recallPurpose), ct))
             .RequireCapability(ApiCapability.Read);
 
         group.MapGet("/recall-feedback/miss-rate", (
             IMediator mediator,
             CancellationToken ct,
-            [FromQuery] DateTimeOffset from,
-            [FromQuery] DateTimeOffset to,
+            [FromQuery] string from,
+            [FromQuery] string to,
             [FromQuery] string? recallPurpose = null) =>
-            mediator.Send(new GetMissRate.Request(from, to, recallPurpose), ct))
+            mediator.Send(new GetMissRate.Request(ParseInstant(from), ParseInstant(to), recallPurpose), ct))
             .RequireCapability(ApiCapability.Read);
 
         // Resettable baseline (LADR-04): feedback is disposable, so this is legitimate, not destructive.
         group.MapPost("/recall-feedback/reset", (IMediator mediator, CancellationToken ct) =>
             mediator.Send(new ResetRecallFeedback.Request(), ct))
             .RequireCapability(ApiCapability.Write);
+
+        // Capability probe for the Console login (HLD-009): reports which tier the presented
+        // credential grants, so a read-only session is told apart from a read+write one without
+        // attempting a write. Read-gated — the middleware accepts either token — the handler
+        // resolves which one it was.
+        group.MapGet("/capabilities", (
+            HttpContext http,
+            ApiAccessAuthorizer authorizer) =>
+        {
+            ApiCapability? resolved = authorizer.ResolveCapability(
+                http.Request.Headers.Authorization.FirstOrDefault());
+            if (resolved is null)
+            {
+                return Results.Forbid();
+            }
+
+            string[] capabilities = resolved == ApiCapability.Write
+                ? ["read", "write"]
+                : ["read"];
+            return Results.Ok(new { capabilities });
+        })
+        .RequireCapability(ApiCapability.Read);
     }
+
+    private static Instant ParseInstant(string value)
+    {
+        try { return InstantJson.Parse(value); }
+        catch (FormatException)
+        {
+            throw new BadHttpRequestException("Timestamp must include Z or an explicit UTC offset.");
+        }
+    }
+
 }

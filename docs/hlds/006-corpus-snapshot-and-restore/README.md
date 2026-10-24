@@ -4,14 +4,14 @@
 
 | | |
 |---|---|
-| **Status** | Accepted — implemented; the `snapshot`/`verify`/`restore` verbs, the archive format (now v3) and the HTTP surface all shipped |
+| **Status** | Accepted — implemented; the `snapshot`/`verify`/`restore` verbs, the archive format (now v4) and the HTTP surface all shipped |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory operability |
 | **Business authority** | [BRD-001 — Cross-product linked context memory](../../brd/001-context-memory/) (`BR-37`, supported by `BR-13`, `BR-16`) |
 | **Last updated** | 2026-09-29 |
 
 > **Implemented and accepted**: the `snapshot`/`verify`/`restore` verbs, the archive format
-> (now v3) and the HTTP surface all shipped. This document still delivers **intent + spec** —
+> (now v4) and the HTTP surface all shipped. This document still delivers **intent + spec** —
 > what the design is, the decisions behind it, and the quality bar it must meet — so behaviour
 > questions are answered against the code rather than against a plan. It carries no
 > implementation plan; that execution is done.
@@ -73,14 +73,15 @@ carried no such counts and so reported clean for a capture that could not restor
 certified; without them, an archive that downloaded a store with an unresolvable reference would
 verify clean and then fail restore.
 
-The current format version is **3**, and every version below it is refused outright rather than
+The current format version is **4**, and every version below it is refused outright rather than
 read with a default:
 
 | Version | Change | Why an older archive is refused rather than read |
 |---|---|---|
 | 1 | original layout | No `DanglingReferences`/`MismatchedBodies` counts, so an archive that recorded a body it could not resolve deserialises them as zero and then verifies *clean* before failing to restore |
 | 2 | added those two counts, with refusal semantics | `SnapshotArchiveEntry` has no `ContentType`, so a restore cannot re-derive a body's MIME type and every body comes back as `application/octet-stream` — a loss that begins at capture and is invisible afterwards |
-| 3 | current; `ContentType` per blob body | — |
+| 3 | `ContentType` per blob body | — |
+| 4 | current; product-name graph members (`Product`/`Initiative`/`Repo` vertices, `HAS_INITIATIVE`/`HAS_REPO` edges) and their counts | |
 
 Each bump is a breaking change to the member layout, and the gate is `refuse`, not `read with a
 default`, precisely because a default is indistinguishable from a recorded value. The round-trip

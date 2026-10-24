@@ -44,6 +44,112 @@ deadline. It bounds a single read and the whole `deepsearch` chain; an out-of-ra
 is **refused with `bad-deadline`, never clamped**, because a budget that silently becomes something else
 is one the operator trusts and the system does not honour. The provisioner does not set it.
 
+## The optional decision gate
+
+`CONTEXT_MEMORY_DECISIONS_ENABLED=true` turns on a value gate: each memory or Understanding about to be
+exported is scored by a **local decision model** for value to each target role, and a record no role
+values is held back rather than written. **Off by default**, and nothing here is required — an operator
+who never sets it runs exactly as before, with no model installed.
+
+Everything is client-side. There is **no model in the Host or Application**, no server-side scoring, and
+no API change. The gate is a quality signal only: a score never changes `status`, kind, or approval.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CONTEXT_MEMORY_DECISIONS_ENABLED` | `false` | Feature flag. Anything but exactly `true` leaves the gate skipped |
+| `CONTEXT_MEMORY_DECISIONS_BASE_URL` | `http://localhost:11434` | Decision API origin (local Ollama) |
+| `CONTEXT_MEMORY_DECISIONS_PATH` | `/v1/systemone` | Endpoint path (Jev-compatible) |
+| `CONTEXT_MEMORY_DECISIONS_MODEL` | `nimble` | Decision model (`ollama pull nimble`) |
+| `CONTEXT_MEMORY_DECISIONS_API_KEY` | *(empty)* | Bearer token, sent **only when non-empty**. Never printed by `env-export` or the profile |
+| `CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY` | `0.85` | Pass threshold per role — a role must score **strictly above** it |
+| `CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS` | `3` | Scoring rounds per record, counting the first |
+| `CONTEXT_MEMORY_DECISIONS_ROLES` | `product-owner,designer,developer,tester,business` | Rubric roles to ask about |
+| `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD` | `hold` | After the last attempt: `hold` (not exported) or `mark` (exported with `audience:*` tags) |
+| `CONTEXT_MEMORY_DECISIONS_TIMEOUT` | `30` | Seconds per decision request |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED` | `false` | Turn on stage-3 of staged dedup: a model asks, per doubtful pair, whether two statements make the same claim. Off by default (stage 2 lexical candidates are still shown, as "possible duplicate (lexical only)") |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_MIN_PROBABILITY` | `0.5` | Same-claim threshold — a pair scores **strictly above** it to be proposed as a duplicate |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_PAIRS_PER_CANDIDATE` | `3` | Most pairs stage 3 asks the model about per candidate |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_PAIRS_PER_BATCH` | `20` | Most pairs stage 3 asks across a batch; beyond it, `unexamined (budget)` is disclosed per candidate |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_RESULTS` | `5` | Most lexical candidates stage 2 retrieves per subject |
+
+**Where the decision settings live: in the environment, and nowhere else.** The gate and the read settings (base URL, read token) read the
+process environment only. `scripts/run.sh` adds each of the fourteen non-secret settings that is
+**missing** to a marked block in your shell profile (`~/.zshrc`, `~/.bashrc` or `~/.profile` by login
+shell; `MIMIS_PROFILE` names another, `MIMIS_PROFILE=off` leaves profiles alone) — **add-only**: a setting
+already exported, or assigned anywhere in the profile, is never added again and never changed, so your own
+endpoint, model and threshold survive every restart. `run.ps1` does the same on Windows with User-scope
+environment variables. The API key is never written by either: it is your secret to export. A session
+started before the profile changed has not inherited the new values — open a new shell, or restart the
+app that launched the agent. The one exception is the write token, which a write route reads from `~/.mimisbrunnr/credentials` when it is not already in the environment. No other file is consulted, so the gate never silently falls back to a
+launcher default you did not choose.
+
+**Check it before enabling it:**
+
+```bash
+python3 -B .agents/skills/_mimisbrunnr-shared/scripts/context_memory_client.py decisions-probe
+```
+
+Reports `disabled`, `unreachable`, `model-missing`, or `ok`, and the endpoint origin — never the key.
+
+**Three properties worth knowing before you rely on it:**
+
+- **A failed gate is never a low score.** `unreachable`, `timed-out`, `http-<code>`, `bad-response` and
+  `oversize` all **keep** the record and disclose the reason. A decision model that is down must not block
+  a capture, and a hung model must never read as "this record is worthless".
+- **Redaction runs before any model call**, and a redactor that cannot run means **no request is made at
+  all**. Sending unscrubbed record content to a model is the one outcome the gate exists to prevent.
+- **The attempt counter is the script's, not yours.** A ledger keyed by record identity bounds the
+  rewrite loop, so re-asking cannot buy more attempts — up to the ledger cap (5 000 records). Past it,
+  the most-spent entries are evicted first (never the record being scored), so a long-spent budget can
+  start again; each `score` run reports how many it dropped as `ledgerEvicted`.
+- **A saturated score is not a confident one.** Each scored record carries a `discrimination` block
+  reporting the `margin` between the highest-scoring role and the next one, plus every role tied at
+  the top. On the calibration fixture the mean best-role is `0.99` and 3 of 21 records carry roles
+  scoring exactly `1.00000`, so a three-role `passingRoles` set is usually ambiguous rather than
+  thrice-confirmed. It never affects a verdict — it reports how much to trust the shape of the result,
+  because `passingRoles` becomes `audience:*` tags downstream and a tie would otherwise read as a
+  clear win.
+
+**The threshold is a starting value, and it is now measured rather than merely asserted.** A labelled
+fixture of 21 records — a junk-to-specific gradient across six domains — is committed with the skill and
+scored against the shipped gate:
+
+```bash
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/score_decisions_calibration.py
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/score_decisions_calibration.py --check-determinism
+```
+
+At the shipped default the gate scored **precision 1.00, recall 1.00** — mean best-role **0.14** on the six
+hold-side records against **0.99** on the fifteen that state a checkable fact. Re-running prints the
+committed figures beside a fresh run and names anything that moved; `--check-determinism` scores the whole
+fixture three times and fails if the runs differ, because determinism is what makes a threshold pinnable at
+all. Three things that measurement settles, each of which had been argued from impression:
+
+- **The threshold is not a sensitive knob here.** The scores are bimodal — nothing between `0.21` and
+  `0.96` — so any bar in that band gives identical verdicts, which is why the default moved to `0.85`
+  without changing a single verdict on the fixture. What it does change is attribution: roles clearing
+  the bar fall from 27 of 30 expected to 24 of 30. Both runs are recorded in the fixture.
+- **Tightening the rubric does not tighten the gate.** Two rewrites — enumerating concrete nouns, and
+  narrowing the criteria — both dropped precision to `0.94` and lost six expected roles, because the
+  `instructions` carry the framing and a narrower *criteria* block did not narrow the *question*. Both
+  rejected variants are recorded with their numbers in the fixture.
+- **Do not apply the vendor's fitted temperature.** Nimble was fitted at `T=2.179` so probabilities match
+  correctness rates, not so they separate better. For a binary answer the logit gap is exactly recoverable
+  from the returned probability, so the correction is trivial to apply and **it makes the gate worse**:
+  junk rises from `0.14` to `0.31` and separation falls from `0.85` to `0.62`.
+
+Role attribution is the weaker half and the measurement says so: `tester` clears 15 of 21 records and
+carries almost no negative information, and `product-owner`/`business` stay correlated at `r=0.92` even
+after their shared vocabulary was removed. A single `choice` question was measured as an alternative and
+was **not** more accurate (13 of 15 labelled records against 14). Neither is fixable by rewording — two
+rewrites both dropped precision to `0.94`, because the `instructions` carry the framing and a narrower
+`criteria` block did not narrow the *question*. Roles beyond the five, and exemptions for `self`-scope or
+agent-facing records, remain open decisions — see the change row in the capture skill's `AGENTS.md`.
+
+The gate has **not** been exercised against a remote Jev-compatible endpoint, which is the configuration
+these settings exist to permit. Its transport guards for that case (https required off-loopback, bearer
+key required, userinfo refused) are unit-tested, but no remote endpoint has answered a request.
+
 ## One-command provisioning
 
 For a local deployment, run the provisioner once:
@@ -129,9 +235,9 @@ pwsh ./scripts/run.ps1             #    Windows / PowerShell 7
 Step 2 pulls the published controller image and starts the whole stack in one command. Step 1 is the
 same provisioner every other run mode on this page uses, and here it is not optional: the launcher
 **adopts** that file's token pair rather than minting its own, so the controller and the skills hold the
-same values. Without it the stack starts and every skill request returns `403` — `run.sh` also publishes
-the client-facing values to `~/.mimisbrunnr/credentials`, but `run.ps1` writes only its own
-`Parameters__*` file.
+same values. Without it the stack starts and every skill request returns `403`. Both launchers then
+publish the client-facing values: the base URL and read token as environment variables (shell profile
+for `run.sh`, User scope for `run.ps1` on Windows), the write token to `~/.mimisbrunnr/credentials`.
 
 The launcher generates the five release secrets on first run — the three engine values
 (`PostgresConfiguration__Password`, `BlobConfiguration__AccessKey`,
@@ -140,19 +246,26 @@ The launcher generates the five release secrets on first run — the three engin
 `~/.mimisbrunnr/controller.env` (mode 600) so restarts do not rotate a token a running Host already
 holds.
 
-Your environment wins over the stored file, and a value supplied that way is deliberately not written
-to disk. The token names contain hyphens, so they cannot be exported by a shell at all — use
-`env 'Parameters__api-read-token=…' ./run.sh up` or PowerShell's `$env:` provider.
+**`CONTEXT_MEMORY_BASE_URL`, `CONTEXT_MEMORY_READ_TOKEN` and `CONTEXT_MEMORY_WRITE_TOKEN` are the
+master when they exist** — in the environment, or (for `run.sh`) in the shell profile, and for the write
+token in `~/.mimisbrunnr/credentials`. The API is published on the base URL's port (a `P_HOST` /
+`-HostPort` that disagrees is refused) and the controller is started with those tokens, overwriting its
+stored pair, so every client holding them reaches the Host without a `403`. The `Parameters__*` names
+also win for one run but are deliberately not written to disk; they contain hyphens, so they cannot be
+exported by a shell at all — use `env 'Parameters__api-read-token=…' ./run.sh up` or PowerShell's `$env:`
+provider.
 
 Options, the data-root layout, platform differences and the security notes are in
 [`scripts/CONTROLLER_LAUNCHER.md`](../../scripts/CONTROLLER_LAUNCHER.md).
 
-**Using the skills from another repository:** the store is a service started once per machine, and
-`run.sh` also publishes the API credentials to `~/.mimisbrunnr/credentials` — outside every checkout. A
-second repository therefore needs neither `provision-credentials.sh` nor a credential file of its own:
-copy `.agents/skills/mimisbrunnr-*` across, and the clients find the credential on their own. Reads are
-ambient; a write needs `set -a && source ~/.mimisbrunnr/credentials && set +a`, because a write
-credential is deliberately never loaded implicitly. The full sequence, and what sharing one store means
+**Using the skills from another repository:** the store is a service started once per machine, and the
+launcher publishes the client settings outside every checkout — environment variables for the base URL
+and read token, `~/.mimisbrunnr/credentials` for the write token alone. A second repository therefore
+needs neither `provision-credentials.sh` nor a credential file of its own: copy
+`.agents/skills/mimisbrunnr-*` across. Reads use the environment; a write reads the token from
+`~/.mimisbrunnr/credentials` (or `set -a && source ~/.mimisbrunnr/credentials && set +a` in a subshell),
+because an exported write token would reach every process — and the read client refuses to start beside
+one. The full sequence, and what sharing one store means
 for repository isolation, is in the README's *Use it in another repository*.
 
 ### Direct Host run

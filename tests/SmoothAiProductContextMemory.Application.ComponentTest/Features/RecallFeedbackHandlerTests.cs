@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.Extensions.Logging;
 using Shouldly;
 using SmoothAiProductContextMemory.Application.Abstractions;
@@ -107,10 +108,10 @@ public sealed class RecallFeedbackHandlerTests(AspireFixture aspire) : HandlerTe
     }
 
     private QueryMemories.Handler NewQuery(IRecallFeedback feedback) =>
-        new(AppDb, Search, feedback, Loggers.CreateLogger<QueryMemories.Handler>());
+        new(AppDb, Search, feedback, ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
 
     private SetMemories.Handler NewSet() =>
-        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
+        new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
 
     private static QueryMemories.Request Query() =>
         new(null, null, null, null, null, null, null, null, null, null, null);
@@ -132,7 +133,7 @@ public sealed class RecallFeedbackHandlerTests(AspireFixture aspire) : HandlerTe
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow.AddDays(-1),
+                    SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1)),
                     null,
                     null,
                     null),

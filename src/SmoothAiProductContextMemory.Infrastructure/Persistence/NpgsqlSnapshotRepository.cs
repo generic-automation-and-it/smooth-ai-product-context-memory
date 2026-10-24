@@ -1,3 +1,6 @@
+using NodaTime.Text;
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using System.Data;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
@@ -6,9 +9,9 @@ using Npgsql;
 using NpgsqlTypes;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
+using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 using SmoothAiProductContextMemory.Infrastructure.Persistence.Configurations;
-using SmoothAiProductContextMemory.Infrastructure.Storage;
 using SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
@@ -92,6 +95,12 @@ public sealed class NpgsqlSnapshotRepository(
         SnapshotEdge[] edges = await ReadMemoryEdgesAsync(db, cancellationToken);
         SnapshotTicketVertex[] ticketVertices = await ReadTicketVerticesAsync(db, cancellationToken);
         SnapshotTicketEdge[] ticketEdges = await ReadTicketEdgesAsync(db, cancellationToken);
+        SnapshotAboutEdge[] aboutEdges = await ReadAboutEdgesAsync(db, cancellationToken);
+        SnapshotProductVertex[] productVertices = await ReadProductVerticesAsync(db, cancellationToken);
+        SnapshotNamedVertex[] initiativeVertices = await ReadNamedVerticesAsync(AgeSession.InitiativeLabel, db, cancellationToken);
+        SnapshotNamedVertex[] repoVertices = await ReadNamedVerticesAsync(AgeSession.RepoLabel, db, cancellationToken);
+        SnapshotProductInitiativeEdge[] productInitiativeEdges = await ReadProductInitiativeEdgesAsync(db, cancellationToken);
+        SnapshotProductRepoEdge[] productRepoEdges = await ReadProductRepoEdgesAsync(db, cancellationToken);
 
         // Resolve the blob set while the database snapshot is still held, so the walk and the state
         // citing it describe the same moment (LADR-03). Committing first would let a blob be deleted
@@ -111,6 +120,12 @@ public sealed class NpgsqlSnapshotRepository(
             edges,
             ticketVertices,
             ticketEdges,
+            aboutEdges,
+            productVertices,
+            initiativeVertices,
+            repoVertices,
+            productInitiativeEdges,
+            productRepoEdges,
             receipts);
 
         return new SnapshotCaptureResult(
@@ -124,6 +139,12 @@ public sealed class NpgsqlSnapshotRepository(
                 walk.Blobs.Count,
                 ticketVertices.Length,
                 ticketEdges.Length,
+                aboutEdges.Length,
+                productVertices.Length,
+                initiativeVertices.Length,
+                repoVertices.Length,
+                productInitiativeEdges.Length,
+                productRepoEdges.Length,
                 receipts.Length));
     }
 
@@ -179,6 +200,9 @@ public sealed class NpgsqlSnapshotRepository(
         await RestoreEdgesAsync(db, capture, cancellationToken);
         await RestoreTicketVerticesAsync(db, capture, cancellationToken);
         await RestoreTicketEdgesAsync(db, capture, cancellationToken);
+        await RestoreAboutEdgesAsync(db, capture, cancellationToken);
+        await RestoreProductVerticesAsync(db, capture, cancellationToken);
+        await RestoreProductEdgesAsync(db, capture, cancellationToken);
         await ResetSequencesAsync(db, cancellationToken);
         foreach (OperationReceipt receipt in capture.OperationReceipts ?? [])
         {
@@ -214,6 +238,12 @@ public sealed class NpgsqlSnapshotRepository(
         && readBack.Edges == expected.Edges
         && readBack.TicketVertices == expected.TicketVertices
         && readBack.TicketEdges == expected.TicketEdges
+        && readBack.AboutEdges == expected.AboutEdges
+        && readBack.ProductVertices == expected.ProductVertices
+        && readBack.InitiativeVertices == expected.InitiativeVertices
+        && readBack.RepoVertices == expected.RepoVertices
+        && readBack.ProductInitiativeEdges == expected.ProductInitiativeEdges
+        && readBack.ProductRepoEdges == expected.ProductRepoEdges
         && readBack.TraversalPathCount == expected.Edges;
 
     private static async Task<RestoreResults> ReadBackAsync(
@@ -226,6 +256,12 @@ public sealed class NpgsqlSnapshotRepository(
             await CountAsync(db, $"memory_graph.\"{AgeSession.EdgeLabel}\"", cancellationToken),
             await CountAsync(db, "memory_graph.\"Ticket\"", cancellationToken),
             await CountAsync(db, "memory_graph.\"TICKET_PARENT\"", cancellationToken),
+            await CountAsync(db, $"memory_graph.\"{AgeSession.AboutEdgeLabel}\"", cancellationToken),
+            await CountAsync(db, $"memory_graph.\"{AgeSession.ProductLabel}\"", cancellationToken),
+            await CountAsync(db, $"memory_graph.\"{AgeSession.InitiativeLabel}\"", cancellationToken),
+            await CountAsync(db, $"memory_graph.\"{AgeSession.RepoLabel}\"", cancellationToken),
+            await CountAsync(db, $"memory_graph.\"{AgeSession.HasInitiativeEdgeLabel}\"", cancellationToken),
+            await CountAsync(db, $"memory_graph.\"{AgeSession.HasRepoEdgeLabel}\"", cancellationToken),
             await RunTraversalAsync(db, cancellationToken),
             Committed: false);
 
@@ -260,7 +296,7 @@ public sealed class NpgsqlSnapshotRepository(
             {
                 using var buffer = new MemoryStream();
                 await content.Content.CopyToAsync(buffer, cancellationToken);
-                string actual = Sha256ContentAddress.Compute(buffer.ToArray());
+                string actual = ContentAddress.Compute(buffer.ToArray());
                 blobs.Add(new SnapshotBlob(
                     address,
                     string.Equals(actual, address, StringComparison.Ordinal)
@@ -347,10 +383,10 @@ public sealed class NpgsqlSnapshotRepository(
         {
             string observed = edge.ObservedAt is null
                 ? string.Empty
-                : $", observedAt: {CypherLiteral.Quote(edge.ObservedAt.Value.ToString("O", CultureInfo.InvariantCulture))}";
+                : $", observedAt: {CypherLiteral.Quote(InstantPattern.ExtendedIso.Format(edge.ObservedAt.Value))}";
             string props =
                 $"reason: {CypherLiteral.Quote(edge.Reason)}, source: {CypherLiteral.Quote(edge.Source)}, " +
-                $"recordedAt: {CypherLiteral.Quote(edge.RecordedAt.ToString("O", CultureInfo.InvariantCulture))}{observed}";
+                $"recordedAt: {CypherLiteral.Quote(InstantPattern.ExtendedIso.Format(edge.RecordedAt))}{observed}";
             // Predicate form, mirroring NpgsqlTicketGraph.MutationPredicate: the inline-map anchor
             // compiles to `properties @>` and scans the vertex table. Ticket provider/key equality
             // has dedicated HASH expression indexes, so the predicate form is index-served.
@@ -359,6 +395,79 @@ public sealed class NpgsqlSnapshotRepository(
                 $"WHERE c.provider = {CypherLiteral.Quote(edge.Provider)} AND c.key = {CypherLiteral.Quote(edge.Key)} " +
                 $"  AND p.provider = {CypherLiteral.Quote(edge.ParentProvider)} AND p.key = {CypherLiteral.Quote(edge.ParentKey)} " +
                 $"CREATE (p)-[:TICKET_PARENT {{{props}}}]->(c)";
+            await ExecuteCypherAsync(db, cypher, cancellationToken);
+        }
+    }
+
+    private static async Task RestoreAboutEdgesAsync(
+        SmoothAiProductContextMemoryDbContext db,
+        SnapshotCapture capture,
+        CancellationToken cancellationToken)
+    {
+        foreach (SnapshotAboutEdge edge in capture.AboutEdges)
+        {
+            // The Memory and Ticket vertices are restored before these edges, so both anchors exist.
+            // Property predicates, mirroring NpgsqlMemoryGraph.CreateAboutAsync: the memory anchor is
+            // served by ix_memory_vertex_uuid and the ticket identity by the provider/key indexes.
+            string cypher =
+                $"MATCH (s:{AgeSession.VertexLabel}), (t:{AgeSession.TicketLabel}) " +
+                $"WHERE s.memory_uuid = {Quote(edge.MemoryUuid)} " +
+                $"  AND t.provider = {CypherLiteral.Quote(edge.Provider)} " +
+                $"  AND t.key = {CypherLiteral.Quote(edge.Key)} " +
+                $"CREATE (s)-[:{AgeSession.AboutEdgeLabel} {{reason: {CypherLiteral.Quote(edge.Reason)}, declaredAt: {CypherLiteral.Quote(InstantPattern.ExtendedIso.Format(edge.DeclaredAt))}}}]->(t)";
+            await ExecuteCypherAsync(db, cypher, cancellationToken);
+        }
+    }
+
+    private static async Task RestoreProductVerticesAsync(
+        SmoothAiProductContextMemoryDbContext db,
+        SnapshotCapture capture,
+        CancellationToken cancellationToken)
+    {
+        foreach (SnapshotProductVertex vertex in capture.ProductVertices)
+        {
+            string? description = vertex.Description is null
+                ? null
+                : $", description: {CypherLiteral.Quote(vertex.Description)}";
+            string cypher = $"CREATE (p:{AgeSession.ProductLabel} {{name: {CypherLiteral.Quote(vertex.Name)}, status: {CypherLiteral.Quote(vertex.Status)}{description}}})";
+            await ExecuteCypherAsync(db, cypher, cancellationToken);
+        }
+
+        foreach (SnapshotNamedVertex vertex in capture.InitiativeVertices)
+        {
+            string cypher = $"MERGE (i:{AgeSession.InitiativeLabel} {{name: {CypherLiteral.Quote(vertex.Name)}}})";
+            await ExecuteCypherAsync(db, cypher, cancellationToken);
+        }
+
+        foreach (SnapshotNamedVertex vertex in capture.RepoVertices)
+        {
+            string cypher = $"MERGE (r:{AgeSession.RepoLabel} {{name: {CypherLiteral.Quote(vertex.Name)}}})";
+            await ExecuteCypherAsync(db, cypher, cancellationToken);
+        }
+    }
+
+    private static async Task RestoreProductEdgesAsync(
+        SmoothAiProductContextMemoryDbContext db,
+        SnapshotCapture capture,
+        CancellationToken cancellationToken)
+    {
+        foreach (SnapshotProductInitiativeEdge edge in capture.ProductInitiativeEdges)
+        {
+            string cypher = $$"""
+                MATCH (p:{{AgeSession.ProductLabel}}) WHERE p.name = {{CypherLiteral.Quote(edge.ProductName)}}
+                MATCH (i:{{AgeSession.InitiativeLabel}}) WHERE i.name = {{CypherLiteral.Quote(edge.InitiativeName)}}
+                CREATE (p)-[:{{AgeSession.HasInitiativeEdgeLabel}} {reason: {{CypherLiteral.Quote(edge.Reason)}}, source: {{CypherLiteral.Quote(edge.Source)}}, declaredAt: {{CypherLiteral.Quote(InstantPattern.ExtendedIso.Format(edge.DeclaredAt))}}}]->(i)
+                """;
+            await ExecuteCypherAsync(db, cypher, cancellationToken);
+        }
+
+        foreach (SnapshotProductRepoEdge edge in capture.ProductRepoEdges)
+        {
+            string cypher = $$"""
+                MATCH (p:{{AgeSession.ProductLabel}}) WHERE p.name = {{CypherLiteral.Quote(edge.ProductName)}}
+                MATCH (r:{{AgeSession.RepoLabel}}) WHERE r.name = {{CypherLiteral.Quote(edge.RepoName)}}
+                CREATE (p)-[:{{AgeSession.HasRepoEdgeLabel}} {reason: {{CypherLiteral.Quote(edge.Reason)}}, source: {{CypherLiteral.Quote(edge.Source)}}, declaredAt: {{CypherLiteral.Quote(InstantPattern.ExtendedIso.Format(edge.DeclaredAt))}}}]->(r)
+                """;
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
     }
@@ -435,8 +544,8 @@ public sealed class NpgsqlSnapshotRepository(
         var rows = new List<SnapshotTicketEdge>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            DateTimeOffset? observedAt = ReadOptionalAgtypeString(reader, 7) is { } observed
-                ? DateTimeOffset.Parse(observed, CultureInfo.InvariantCulture)
+            Instant? observedAt = ReadOptionalAgtypeString(reader, 7) is { } observed
+                ? InstantJson.Parse(observed)
                 : null;
             rows.Add(new SnapshotTicketEdge(
                 AgtypeArrayReader.ReadAgtypeString(reader, 2),
@@ -445,8 +554,117 @@ public sealed class NpgsqlSnapshotRepository(
                 AgtypeArrayReader.ReadAgtypeString(reader, 1),
                 AgtypeArrayReader.ReadAgtypeString(reader, 4),
                 AgtypeArrayReader.ReadAgtypeString(reader, 5),
-                DateTimeOffset.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 6), CultureInfo.InvariantCulture),
+                InstantJson.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 6)),
                 observedAt));
+        }
+
+        return rows.ToArray();
+    }
+
+    private static async Task<SnapshotAboutEdge[]> ReadAboutEdgesAsync(
+        SmoothAiProductContextMemoryDbContext db,
+        CancellationToken cancellationToken)
+    {
+        string cypher = $"""
+            MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.AboutEdgeLabel}]->(t:{AgeSession.TicketLabel})
+            RETURN s.memory_uuid, t.provider, t.key, e.reason, e.declaredAt
+            """;
+        await using NpgsqlCommand command = CypherCommand(
+            db, cypher, ["source", "provider", "key", "reason", "declared"]);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        var rows = new List<SnapshotAboutEdge>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new SnapshotAboutEdge(
+                Guid.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 0)),
+                AgtypeArrayReader.ReadAgtypeString(reader, 1),
+                AgtypeArrayReader.ReadAgtypeString(reader, 2),
+                AgtypeArrayReader.ReadAgtypeString(reader, 3),
+                InstantJson.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 4))));
+        }
+
+        return rows.ToArray();
+    }
+
+    private static async Task<SnapshotProductVertex[]> ReadProductVerticesAsync(
+        SmoothAiProductContextMemoryDbContext db,
+        CancellationToken cancellationToken)
+    {
+        string cypher = $"MATCH (p:{AgeSession.ProductLabel}) RETURN p.name, p.description, p.status";
+        await using NpgsqlCommand command = CypherCommand(db, cypher, ["name", "description", "status"]);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        var rows = new List<SnapshotProductVertex>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new SnapshotProductVertex(
+                AgtypeArrayReader.ReadAgtypeString(reader, 0),
+                ReadOptionalAgtypeString(reader, 1),
+                AgtypeArrayReader.ReadAgtypeString(reader, 2)));
+        }
+
+        return rows.ToArray();
+    }
+
+    private static async Task<SnapshotNamedVertex[]> ReadNamedVerticesAsync(
+        string label,
+        SmoothAiProductContextMemoryDbContext db,
+        CancellationToken cancellationToken)
+    {
+        string cypher = $"MATCH (n:{label}) RETURN n.name";
+        await using NpgsqlCommand command = CypherCommand(db, cypher, ["name"]);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        var rows = new List<SnapshotNamedVertex>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new SnapshotNamedVertex(AgtypeArrayReader.ReadAgtypeString(reader, 0)));
+        }
+
+        return rows.ToArray();
+    }
+
+    private static async Task<SnapshotProductInitiativeEdge[]> ReadProductInitiativeEdgesAsync(
+        SmoothAiProductContextMemoryDbContext db,
+        CancellationToken cancellationToken)
+    {
+        string cypher = $$"""
+            MATCH (p:{{AgeSession.ProductLabel}})-[e:{{AgeSession.HasInitiativeEdgeLabel}}]->(i:{{AgeSession.InitiativeLabel}})
+            RETURN p.name, i.name, e.reason, e.source, e.declaredAt
+            """;
+        await using NpgsqlCommand command = CypherCommand(db, cypher, ["pname", "iname", "reason", "source", "declared"]);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        var rows = new List<SnapshotProductInitiativeEdge>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new SnapshotProductInitiativeEdge(
+                AgtypeArrayReader.ReadAgtypeString(reader, 0),
+                AgtypeArrayReader.ReadAgtypeString(reader, 1),
+                AgtypeArrayReader.ReadAgtypeString(reader, 2),
+                AgtypeArrayReader.ReadAgtypeString(reader, 3),
+                InstantJson.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 4))));
+        }
+
+        return rows.ToArray();
+    }
+
+    private static async Task<SnapshotProductRepoEdge[]> ReadProductRepoEdgesAsync(
+        SmoothAiProductContextMemoryDbContext db,
+        CancellationToken cancellationToken)
+    {
+        string cypher = $$"""
+            MATCH (p:{{AgeSession.ProductLabel}})-[e:{{AgeSession.HasRepoEdgeLabel}}]->(r:{{AgeSession.RepoLabel}})
+            RETURN p.name, r.name, e.reason, e.source, e.declaredAt
+            """;
+        await using NpgsqlCommand command = CypherCommand(db, cypher, ["pname", "rname", "reason", "source", "declared"]);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        var rows = new List<SnapshotProductRepoEdge>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new SnapshotProductRepoEdge(
+                AgtypeArrayReader.ReadAgtypeString(reader, 0),
+                AgtypeArrayReader.ReadAgtypeString(reader, 1),
+                AgtypeArrayReader.ReadAgtypeString(reader, 2),
+                AgtypeArrayReader.ReadAgtypeString(reader, 3),
+                InstantJson.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 4))));
         }
 
         return rows.ToArray();
@@ -502,7 +720,7 @@ public sealed class NpgsqlSnapshotRepository(
             return false;
         }
 
-        string[] graph = ["Memory", "LINKS", "TICKET_PARENT", "Ticket"];
+        string[] graph = ["Memory", "LINKS", "TICKET_PARENT", "Ticket", "ABOUT", "Product", "Initiative", "Repo", "HAS_INITIATIVE", "HAS_REPO"];
         foreach (string label in graph)
         {
             if (await ExecuteScalarLongAsync(db, $"SELECT count(*) FROM memory_graph.\"{label}\"", cancellationToken) > 0)
@@ -527,8 +745,14 @@ public sealed class NpgsqlSnapshotRepository(
         await ExecuteNonQueryAsync(db, "DELETE FROM initiative", cancellationToken);
         await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"LINKS\"", cancellationToken);
         await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"TICKET_PARENT\"", cancellationToken);
+        await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"ABOUT\"", cancellationToken);
+        await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"HAS_INITIATIVE\"", cancellationToken);
+        await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"HAS_REPO\"", cancellationToken);
         await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"Memory\"", cancellationToken);
         await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"Ticket\"", cancellationToken);
+        await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"Product\"", cancellationToken);
+        await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"Initiative\"", cancellationToken);
+        await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"Repo\"", cancellationToken);
 
         // Recall feedback is excluded from the archive (HLD-004: disposable tuning telemetry), so a
         // restore can never bring the matching rows back. memory_uuid has no FK, so rows left behind
@@ -609,7 +833,7 @@ public sealed class NpgsqlSnapshotRepository(
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
             .UseNpgsql(dataSource, npgsql =>
             {
-                npgsql.UseSmoothAiProductContextMemoryHistory();
+                npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory();
                 // Bounds every EF batch this context emits. Restore is the only writer that uses it,
                 // and unbatched it emitted the whole capture's memory_version rows as one INSERT —
                 // a statement whose cost grows with the archive, which no statement-timeout raise

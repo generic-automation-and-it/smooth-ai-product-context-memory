@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Memory"
   short_description: "Get and set persistent context-memory records across sessions"
-  default_prompt: "Capture durable facts and decisions from this work and write them to context memory at the end-of-task checkpoint; use get to recall what has been previously captured about a subject, ticket, repository, or scope."
+  default_prompt: "Use import to recall what has been previously captured about a subject, ticket, repository, or scope. Note durable facts and decisions during the work, but write them to context memory only at an end-of-task checkpoint when I explicitly request --export; with no --export, nothing is written."

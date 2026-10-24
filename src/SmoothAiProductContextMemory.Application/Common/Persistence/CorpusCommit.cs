@@ -1,3 +1,5 @@
+using NodaTime;
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using SmoothAiProductContextMemory.Application.Abstractions;
@@ -7,7 +9,7 @@ namespace SmoothAiProductContextMemory.Application.Common.Persistence;
 
 public static class CorpusCommit
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
 
     public static string Hash<T>(T payload) =>
         Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(payload, Json)));
@@ -40,5 +42,5 @@ public static class CorpusCommit
     }
 
     public static OperationReceipt Receipt<T>(string key, string hash, string operationType, T result) =>
-        new(key, hash, operationType, JsonSerializer.Serialize(result, Json), DateTimeOffset.UtcNow);
+        new(key, hash, operationType, JsonSerializer.Serialize(result, Json), SystemClock.Instance.GetCurrentInstant());
 }

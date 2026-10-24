@@ -94,22 +94,35 @@ if OPENCODE_REVIEW_REPORT_PROVIDER=UNKNOWN "$scratch/opencode" --version >/dev/n
   exit 1
 fi
 
+# The refusal names the variable that held the bad value and, for the underscore spelling of a Go
+# selector, the spelling the resolver accepts — a log line with only the value sent a run looking
+# for the wrong variable.
+set +e
+slip="$(OPENCODE_ANALYSE_PROVIDER=OPENCODE_GO_OPENAI "$scratch/opencode" --version 2>&1 >/dev/null)"
+slip_status=$?
+set -e
+[ "$slip_status" -eq 64 ] || { echo "underscore Go selector exited $slip_status, expected 64" >&2; exit 1; }
+case "$slip" in
+  *"in OPENCODE_ANALYSE_PROVIDER: 'OPENCODE_GO_OPENAI'"*"did you mean 'OPENCODE-GO-OPENAI'?"*) ;;
+  *) echo "selector refusal did not name the variable and the fix: $slip" >&2; exit 1 ;;
+esac
+for accepted in GEMINI COPILOT OPENAI ANTHROPIC OPENCODE-GO-OPENAI OPENCODE-GO-RESPONSES \
+                OPENCODE-GO-ANTHROPIC OPEN_ROUTER; do
+  OPENCODE_ANALYSE_PROVIDER="$accepted" "$scratch/opencode" --version >/dev/null 2>&1 \
+    || { echo "documented selector $accepted was rejected" >&2; exit 1; }
+done
+
 mkdir -p "$scratch/project/nested"
 (
   cd "$scratch/project/nested"
   GITHUB_WORKSPACE="$scratch/project" "$scratch/opencode" capture "$scratch/safe-env"
 )
-printf '{"agent":{}}\n' > "$scratch/project/opencode.json"
-if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
-    "$scratch/opencode" --version >/dev/null 2>&1); then
-  echo 'project config override was not rejected' >&2
-  exit 1
-fi
-
+# Project-local opencode.json is intentionally NOT refused: the repository ships its own
+# for local runs, so a config scan can never pass on a clean tree. The symlink checks below
+# are the remaining guard.
 # A deny glob matches the path the model asks for, not what that path resolves to. A symlink
 # committed in a pull request therefore reads a denied target through an innocuous repo path, and
 # no deny rule can see it — so the guard resolves the target itself, before the model starts.
-rm -f "$scratch/project/opencode.json"
 ln -s /proc/self/environ "$scratch/project/docs-leak"
 if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
     "$scratch/opencode" --version >/dev/null 2>&1); then

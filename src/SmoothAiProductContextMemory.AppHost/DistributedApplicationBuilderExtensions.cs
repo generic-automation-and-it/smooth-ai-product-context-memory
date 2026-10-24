@@ -16,6 +16,8 @@ internal static class DistributedApplicationBuilderExtensions
     private const string SeqConnectionStringName = "seq";
     private const string HostReadinessPath = "/health";
     private const string BlobBucketName = "smooth-mimisbrunnr-memory-well";
+    private const string ViewerResourceName = "mimir-viewer";
+    private const int ViewerContainerPort = 5180;
     private const string PostgresImageRegistry = "docker.io";
     private const string PostgresImage = "apache/age";
     private const string PostgresImageTag = "release_PG17_1.7.0";
@@ -33,7 +35,14 @@ internal static class DistributedApplicationBuilderExtensions
             var apiReadToken = builder.AddParameter("api-read-token", secret: true);
             var apiWriteToken = builder.AddParameter("api-write-token", secret: true);
 
-            builder.AddHostProject(database, blob, seq, apiReadToken, apiWriteToken, configuration);
+            var hostEndpoint = configuration.UseProject
+                ? builder.AddHostProject(database, blob, seq, apiReadToken, apiWriteToken, configuration).GetEndpoint("http")
+                : builder.AddHostContainer(database, blob, seq, apiReadToken, apiWriteToken, configuration).GetEndpoint("http");
+
+            if (configuration.ViewerEnabled)
+            {
+                builder.AddViewer(hostEndpoint, apiReadToken, configuration);
+            }
 
             return builder;
         }
@@ -88,10 +97,10 @@ internal static class DistributedApplicationBuilderExtensions
 
             postgres = builder.ConfigureReleaseEndpoint(postgres, "tcp", configuration);
 
-            if (!configuration.IsRelease)
-            {
-                postgres = postgres.WithLifetime(ContainerLifetime.Persistent);
-            }
+            // Persistent in every mode (APPHOST_AGENTS.md: "detached memories must survive an AppHost
+            // exit"). Release mode was previously left at the Session default, so a controller restart
+            // removed and recreated postgres; a restart should reuse the running container instead.
+            postgres = postgres.WithLifetime(ContainerLifetime.Persistent);
 
             // The dashboard name follows Mímir's severed head. Keep the physical database as "app":
             // changing it on an existing persistent cluster requires an explicit data migration.
@@ -122,7 +131,7 @@ internal static class DistributedApplicationBuilderExtensions
                     "--label", $"com.docker.compose.service={configuration.BlobContainerName}",
                     "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
                     "--label", $"{AppHostConfiguration.ManagedLabel}=true")
-                .WithLifetime(configuration.IsRelease ? ContainerLifetime.Session : ContainerLifetime.Persistent);
+                .WithLifetime(ContainerLifetime.Persistent);
 
             blob = builder.ConfigureReleaseEndpoint(blob, "s3", configuration);
             blob = builder.ConfigureReleaseEndpoint(blob, "console", configuration);
@@ -147,12 +156,12 @@ internal static class DistributedApplicationBuilderExtensions
                     "--label", $"com.docker.compose.service={configuration.SeqContainerName}",
                     "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
                     "--label", $"{AppHostConfiguration.ManagedLabel}=true")
-                .WithLifetime(configuration.IsRelease ? ContainerLifetime.Session : ContainerLifetime.Persistent);
+                .WithLifetime(ContainerLifetime.Persistent);
 
             return builder.ConfigureReleaseEndpoint(seq, "http", configuration);
         }
 
-        private void AddHostProject(
+        private IResourceBuilder<ProjectResource> AddHostProject(
             IResourceBuilder<PostgresDatabaseResource> database,
             IResourceBuilder<ContainerResource> blob,
             IResourceBuilder<IResourceWithConnectionString> seq,
@@ -162,11 +171,10 @@ internal static class DistributedApplicationBuilderExtensions
         {
             if (!configuration.UseProject)
             {
-                builder.AddHostContainer(database, blob, seq, apiReadToken, apiWriteToken, configuration);
-                return;
+                throw new InvalidOperationException("AddHostProject requires HostConfiguration:UseProject=true.");
             }
 
-            builder.AddProject<Projects.SmoothAiProductContextMemory_Host>(HostLaunchMode.WorkingTreeResourceName)
+            return builder.AddProject<Projects.SmoothAiProductContextMemory_Host>(HostLaunchMode.WorkingTreeResourceName)
                 .WithReference(database, connectionName: HostConnectionStringName)
                 .WithReference(seq, connectionName: SeqConnectionStringName)
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
@@ -181,7 +189,7 @@ internal static class DistributedApplicationBuilderExtensions
                 .WaitFor(seq);
         }
 
-        private void AddHostContainer(
+        private IResourceBuilder<ContainerResource> AddHostContainer(
             IResourceBuilder<PostgresDatabaseResource> database,
             IResourceBuilder<ContainerResource> blob,
             IResourceBuilder<IResourceWithConnectionString> seq,
@@ -223,6 +231,62 @@ internal static class DistributedApplicationBuilderExtensions
                 .WaitFor(seq);
 
             builder.ConfigureReleaseEndpoint(host, "http", configuration);
+            return host;
+        }
+
+        private void AddViewer(
+            EndpointReference hostEndpoint,
+            IResourceBuilder<ParameterResource> apiReadToken,
+            AppHostConfiguration configuration)
+        {
+            ContainerImageReference imageReference = ContainerImageReference.Parse(configuration.ViewerImage);
+            IResourceBuilder<ContainerResource> viewer = imageReference.Tag is null
+                ? builder.AddContainer(ViewerResourceName, imageReference.Image)
+                : builder.AddContainer(ViewerResourceName, imageReference.Image, imageReference.Tag);
+
+            if (!configuration.IsRelease)
+            {
+                // Build the viewer image from its Dockerfile so `dotnet run AppHost` spins the pod up
+                // without a pre-built :local tag. The Dockerfile needs the repository-root context (it
+                // COPYs the shared capture scripts and the Viewer source). Anchor to the AppHost
+                // assembly location, not the process working directory: `dotnet run --project <path>`
+                // leaves the caller's CWD unchanged, so GetCurrentDirectory() lands outside the repo
+                // when invoked from the repo root.
+                string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
+                viewer = viewer.WithDockerfile(
+                    contextPath: repoRoot,
+                    dockerfilePath: Path.Combine(repoRoot, "src", "SmoothAiProductContextMemory.Viewer", "Dockerfile"));
+            }
+
+            viewer
+                .WithHttpEndpoint(port: configuration.ViewerPort, targetPort: ViewerContainerPort, name: "http")
+                .WithContainerName(configuration.ViewerContainerName)
+                .WithEnvironment("API_READ_TOKEN", apiReadToken)
+                .WithEnvironment("HOST_BASE_URL", hostEndpoint)
+                .WithContainerRuntimeArgs(
+                    "--label", $"com.docker.compose.project={configuration.DockerDesktopGroupName}",
+                    "--label", $"com.docker.compose.service={configuration.ViewerContainerName}",
+                    "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
+                    "--label", $"{AppHostConfiguration.ManagedLabel}=true");
+
+            builder.ConfigureReleaseEndpoint(viewer, "http", configuration);
+        }
+
+        private static string FindRepoRoot(string startDirectory)
+        {
+            string? directory = Path.GetFullPath(startDirectory);
+            for (int depth = 0; depth < 12 && directory is not null; depth++)
+            {
+                if (File.Exists(Path.Combine(directory, "SmoothAiProductContextMemory.slnx")) &&
+                    File.Exists(Path.Combine(directory, "src", "SmoothAiProductContextMemory.Viewer", "Dockerfile")))
+                {
+                    return directory;
+                }
+
+                directory = Directory.GetParent(directory)?.FullName;
+            }
+
+            throw new InvalidOperationException("Could not locate the repository root (SmoothAiProductContextMemory.slnx) from the AppHost assembly directory.");
         }
 
         private IResourceBuilder<T> ConfigureReleaseEndpoint<T>(

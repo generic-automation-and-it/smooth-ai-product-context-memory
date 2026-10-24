@@ -70,6 +70,23 @@ try {
     run(executable, args, { cwd: installDir });
     console.log(`OK: ${name} ${args.join(" ")}`);
   }
+
+  // Heimdallr has no bin, but kvasir's autofill runs the shared copy, and that copy screens tickets
+  // with the redactor found in the same shared folder. If the allowlist ever drops the shared folder,
+  // the scan still exits 0 and only reports `ticketsUnavailable`, so assert that field, not the exit
+  // code.
+  const heimdallr = join(
+    installDir, "node_modules", "@generic-automation-and-it", "mimisbrunnr-skills",
+    ".agents", "skills", "_mimisbrunnr-shared", "scripts",
+    "find_session_metadata.py",
+  );
+  const scan = JSON.parse(
+    run("python3", ["-B", heimdallr, "--json", "--repo-root", pkgRoot], { cwd: installDir }).stdout,
+  );
+  if (scan.ticketsUnavailable !== null) {
+    throw new Error(`packed heimdallr could not load the packed redactor: ${scan.ticketsUnavailable}`);
+  }
+  console.log("OK: find_session_metadata.py --json (redactor resolved)");
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });
 }

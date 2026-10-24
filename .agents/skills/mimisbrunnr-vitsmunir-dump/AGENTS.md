@@ -1,24 +1,25 @@
-# mimisbrunnr-vitsmunir-dump — AGENTS.md
+# AGENTS.md - mimisbrunnr-vitsmunir-dump
 
 ## TL;DR
 
-Pure-prompt behavioral skill (no scripts): a listen-first capture session whose entire value is in NOT acting — never implement, modify, or synthesize until explicitly asked.
+Read [`SKILL.md`](./SKILL.md) first — switches, phases and guardrails live there; the cost rationale is in [`README.md`](./README.md).
 
 ## Non-Negotiables
 
-- **A braindump is never permission to implement.** Even with all switches on, only *grounding* (reading/searching) is widened — the no-modify rule holds until the user asks to synthesize.
-- **Don't "optimize" the SKILL.md by deduplicating switch semantics.** The switch rules are intentionally restated in Switches, Listen, and Guardrails — reinforcement against the model's drift toward premature questioning/action is the point, not redundancy.
-
-## Architecture Decisions
-
-- **LADR-001** (2026-05, accepted): Default mode is tool-free, opt-in switches relax it. *Context:* file/web tool payloads are injected into context and re-billed every subsequent turn of a long capture session. *Decision:* default forbids tools; `--oktoreaddocs`/`--oktowebsearch` opt back in. *Consequence:* any edit that adds default tool use destroys the skill's cost profile — see the README cost table before changing switch behavior.
+- **Don't deduplicate the switch rules in SKILL.md.** They are restated on purpose in Switches, Listen and
+  Guardrails — the repetition counters the model's drift toward premature questions and action.
+- **A switch change edits three tables.** The switch table lives in SKILL.md, this skill's `README.md`
+  (with cost) and `.agents/skills/README.md`; updating one leaves the others stale.
 
 ## Changelog
 
 | Date | Change | Ref |
-|:-----|:-------|:----|
-| 2026-10-03 | **Initialize fills a missing repository/ticket binding from Heimdallr by default** (same skills root, no hardcoded path); tags stay agent-derived keywords; explicit caller values always win. Wording only, no script. | session request |
-| 2026-06-12 | Initial version. | |
-| 2026-09-13 | Added `--all` (enables `--oktoask` `--thinking` `--oktoreaddocs` `--oktowebsearch`). | |
-| 2026-09-14 | Renamed `ai-brain-dump` → `mimisbrunnr-vitsmunir-dump`. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension — this is the AI Brain / Intelligence Dump. | |
-| 2026-09-26 | `SKILL.md`/`README.md` re-laid out switches-first: the switch table opens each file ahead of the H1 and the section was renamed `Modes & Switches` → `Switches`, matching `mimisbrunnr-context-memory` and `mimisbrunnr-kvasir-understanding`. In-body pointers and this file's Non-Negotiables reference updated. No behavioural or contract change. | PR #108 |
+| :---- | :---- | :---- |
+| 2026-06-12 | Initial version | — |
+| 2026-09-13 | Added `--all` (enables `--oktoask` `--thinking` `--oktoreaddocs` `--oktowebsearch`) | #28 |
+| 2026-09-14 | Renamed `ai-brain-dump` → `mimisbrunnr-vitsmunir-dump` | #55 |
+| 2026-10-03 | Initialize fills a missing repository/ticket binding from Heimdallr by default | #168 |
+| 2026-10-05 | Heimdallr autofill moved out of Initialize and stopped binding tickets on its own | #179 |
+| 2026-10-06 | Issue 190 #23/#24: README no longer says `--oktoask` permits inspection during Listen | #190 |
+| 2026-10-06 | README intent review names the Compare / Clarify phase | #188 |
+| 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |

@@ -107,11 +107,13 @@ Understanding is no longer one of them — it is not an available operation: an 
 full as a new version under the same slug, which adds a copy and destroys nothing, so a local export
 reports its outcomes rather than asking. Writing to a mode's default location, or to an explicit `--path`, needs no approval: the
 destination was already chosen, and every write is reported. Exporting to the local disposable store
-proposes the split first — via `AskUserQuestion`, recommending "write everything" — unless `--all` was
-passed. `--all` is not only a waiver of that ask: it also widens what qualifies, so a marginal candidate
-is written rather than dropped and the user prunes afterwards. An agent that never asks but filters hard
-upstream has honoured the letter of the switch and defeated its purpose. The `ai-understanding` skill
-owns the mechanics.
+proposes the split first — via `AskUserQuestion`, recommending "write everything" — unless `--all`
+or `--dontask` was passed. `--all` is not only a waiver of that ask: it also widens what qualifies, so a
+marginal candidate is written rather than dropped and the user prunes afterwards. An agent that never
+asks but filters hard upstream has honoured the letter of the switch and defeated its purpose.
+`--dontask` waives the ask only: it takes the recommended option (write every candidate) and keeps the
+qualifying bar as strict as an unflagged export, so a marginal candidate is still dropped. The
+`ai-understanding` skill owns the mechanics.
 
 ## Changelog
 
@@ -134,3 +136,4 @@ owns the mechanics.
 | 2026-09-20 | `--all` restated as breadth as well as prompt-suppression — it widens the qualifying bar, not only the ask. "Already holds" narrowed to the question rather than the topic: a record of a decision has no claim on the reusable reasoning behind it. |
 | 2026-09-22 | Unit files postfixed `.understanding.md`, mirroring `.instructions.md`; this rule rescoped from always-apply to `**/*understanding.md` so it attaches when an Understanding is opened. |
 | 2026-09-19 | Ask-before list corrected for LADR-010: merging is no longer an operation, so the carve-out is promote plus a consume that would make an incoming copy current. |
+| 2026-10-05 | `--dontask` added to the export-split exception beside `--all`; it waives the ask only and keeps the normal qualifying bar (issue 179). |

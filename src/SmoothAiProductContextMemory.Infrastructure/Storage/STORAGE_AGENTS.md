@@ -13,7 +13,10 @@ Snapshot format 4 adds mandatory `relational/operation_receipt.json`, its manife
 ## Non-Negotiables
 
 - **Content-addressed.** The address is the SHA-256 of the raw (uncompressed) content. Identical content
-  written twice yields one object and the same address — writes are idempotent and safe to retry.
+  written twice yields one object and the same address — writes are idempotent and safe to retry. The
+  derivation lives in Domain (`ContentAddress`), not here: Infrastructure's blob and snapshot stores and
+  Application's claim comparer all use the one function, so an address computed at planning time matches
+  the one a store write persists.
 - **Client-side compression.** Content is gzip-compressed before upload and transparently reversed on
   read, so behaviour is identical across storage backends regardless of server-side compression.
 - **No engine concepts leak.** The `IBlobStorage` interface (`Application/Abstractions/IBlobStorage.cs`)
@@ -61,6 +64,7 @@ abstraction only, so the S3 implementation can be replaced without touching Appl
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | The content hash/address derivation moved to Domain `ContentAddress` (was `Sha256ContentAddress` here); `IBlobStorage.StoreAsync` now documents that its returned address is `ContentAddress.Compute` of the stored bytes. The `BlobStorageCapabilityGuardTests` surface is unchanged. | version-bug |
 | 2026-10-03 | Documented optional knowledge-service commit, evidence, and recovery support implemented in this branch. | optional knowledge service |
 | 2026-10-01 | Four verify guards that no test reached are now pinned, each asserting the single expected finding: a repeated tar member (identical copies, so only the repeat check can see it), a repeated manifest entry, a tampered object count and a tampered ticket-edge count. Test-only; disabling each guard fails its test. | HLD-006 NFR-01 |
 | 2026-10-01 | `TarSnapshotArchive.WriteAsync` honours its `CancellationToken`: the blob reader delegate now takes it (`Func<string, CancellationToken, Task<...>>`, threaded by `SnapshotStore` into `IBlobStorage.GetAsync` and the body copy), members are written with `WriteEntryAsync(entry, token)`, and the loop checks it per blob and once more before the move. A cancelled write leaves neither the archive nor its temp file. L0: `Write_StopsWhenCancelledMidWrite_AndLeavesNoArchiveOrTempFile`, `Write_WithAnAlreadyCancelledToken_ReadsNothing_AndCreatesNoFile`. | HLD-006 NFR-04 |

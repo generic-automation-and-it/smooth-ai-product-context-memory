@@ -1,0 +1,26 @@
+using System.Security.Cryptography;
+
+namespace SmoothAiProductContextMemory.Domain;
+
+/// <summary>
+/// Content-addressed key derived from the SHA-256 of the raw (uncompressed) content. The on-disk
+/// object key is a sharded prefix of the first four hex characters plus the full hash, which keeps a
+/// huge flat namespace from landing in one directory while still referencing the address directly.
+/// </summary>
+public static class ContentAddress
+{
+    public static string Compute(byte[] content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        string hash = Convert.ToHexStringLower(SHA256.HashData(content));
+        return $"{hash[..2]}/{hash[2..4]}/{hash}";
+    }
+
+    /// <summary>Bare lowercase SHA-256 hex of the content — used as the archive entry hash.</summary>
+    public static string Hash(byte[] content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        return Convert.ToHexStringLower(SHA256.HashData(content));
+    }
+}

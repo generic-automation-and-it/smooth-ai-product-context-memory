@@ -18,3 +18,15 @@ artifacts
 *.md
 !Directory.Build.props
 !Directory.Packages.props
+# HLD-009 LADR-09: the viewer image vendors the capture scripts (build from the
+# repo root). Last match wins, and a child of an excluded tree cannot be
+# re-included without reopening each parent — so every level is reopened and
+# immediately shut again except the scripts folder itself.
+!.agents
+.agents/*
+!.agents/skills
+.agents/skills/*
+!.agents/skills/_mimisbrunnr-shared
+.agents/skills/_mimisbrunnr-shared/*
+!.agents/skills/_mimisbrunnr-shared/scripts
+**/__pycache__

@@ -1,3 +1,5 @@
+using NodaTime;
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Formats.Tar;
 using System.Text.Json;
 using SmoothAiProductContextMemory.Application.Abstractions;
@@ -11,9 +13,32 @@ public sealed class OperationReceiptArchiveTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "mimi-receipt-archive-" + Guid.NewGuid().ToString("N"));
     private readonly TarSnapshotArchive _archive = new();
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static readonly OperationReceipt Receipt = new("capture:1:commit", new string('a', 64), "memories", "{\"created\":1}", DateTimeOffset.Parse("2026-10-03T00:00:00Z"));
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
+    private static readonly OperationReceipt Receipt = new("capture:1:commit", new string('a', 64), "memories", "{\"created\":1}", Instant.FromUtc(2026, 10, 3, 0, 0));
     private CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task V6_preserves_receipts_and_main_graph_members_together()
+    {
+        Directory.CreateDirectory(_directory);
+        string path = Path.Combine(_directory, "combined.tar");
+        var about = new SnapshotAboutEdge(Guid.NewGuid(), "synthetic", "T-1", "reference", Receipt.CommittedAt);
+        var product = new SnapshotProductVertex("synthetic-product", "description", "active");
+        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], [],
+            [about], [product], [new SnapshotNamedVertex("initiative")], [new SnapshotNamedVertex("repo")],
+            [new SnapshotProductInitiativeEdge("synthetic-product", "initiative", "reason", "test", Receipt.CommittedAt)],
+            [new SnapshotProductRepoEdge("synthetic-product", "repo", "reason", "test", Receipt.CommittedAt)], [Receipt]);
+        await _archive.WriteAsync(path, capture, new SnapshotWalkResult([], 0, 0),
+            (_, _) => throw new InvalidOperationException("No blobs expected."), Ct);
+        (await _archive.VerifyAsync(path, Ct)).IsClean.ShouldBeTrue();
+        var round = await _archive.ReadAsync(path, Ct);
+        round.Manifest.FormatVersion.ShouldBe(6);
+        round.Capture.OperationReceipts.ShouldNotBeNull().ShouldHaveSingleItem().ShouldBe(Receipt);
+        round.Capture.AboutEdges.ShouldHaveSingleItem().ShouldBe(about);
+        round.Capture.ProductVertices.ShouldHaveSingleItem().ShouldBe(product);
+        round.Capture.ProductInitiativeEdges.ShouldHaveSingleItem().ShouldBe(capture.ProductInitiativeEdges[0]);
+        round.Capture.ProductRepoEdges.ShouldHaveSingleItem().ShouldBe(capture.ProductRepoEdges[0]);
+    }
 
     [Fact]
     public async Task Receipts_are_hashed_counted_and_round_trip()
@@ -59,7 +84,7 @@ public sealed class OperationReceiptArchiveTests : IDisposable
     }
 
     [Fact]
-    public async Task Existing_v3_archive_remains_readable_with_empty_receipts()
+    public async Task Existing_v5_archive_remains_readable_with_empty_receipts()
     {
         string path = await WriteAsync([]);
         Rewrite(path, members =>
@@ -68,7 +93,7 @@ public sealed class OperationReceiptArchiveTests : IDisposable
             SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(members[SnapshotEntryNames.Manifest], Json)!;
             members[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(manifest with
             {
-                FormatVersion = 3,
+                FormatVersion = 5,
                 Entries = manifest.Entries.Where(e => e.Name != SnapshotEntryNames.OperationReceipts).ToArray(),
             }, Json);
         });
@@ -76,11 +101,26 @@ public sealed class OperationReceiptArchiveTests : IDisposable
         (await _archive.ReadAsync(path, Ct)).Capture.OperationReceipts.ShouldNotBeNull().ShouldBeEmpty();
     }
 
+    [Theory]
+    [InlineData(3)]
+    [InlineData(4)]
+    public async Task Pre_graph_formats_are_refused(int version)
+    {
+        string path = await WriteAsync([]);
+        Rewrite(path, members =>
+        {
+            SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(members[SnapshotEntryNames.Manifest], Json)!;
+            members[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(manifest with { FormatVersion = version }, Json);
+        });
+        (await _archive.VerifyAsync(path, Ct)).IsClean.ShouldBeFalse();
+        await Should.ThrowAsync<InvalidDataException>(() => _archive.ReadAsync(path, Ct));
+    }
+
     private async Task<string> WriteAsync(IReadOnlyList<OperationReceipt> receipts)
     {
         Directory.CreateDirectory(_directory);
         string path = Path.Combine(_directory, Guid.NewGuid().ToString("N") + ".tar");
-        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], [], receipts);
+        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], receipts);
         await _archive.WriteAsync(path, capture, new SnapshotWalkResult([], 0, 0),
             (_, _) => throw new InvalidOperationException("No blobs expected."), Ct);
         return path;

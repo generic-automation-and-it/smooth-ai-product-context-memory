@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Abstractions;
 
 namespace SmoothAiProductContextMemory.Application.Features.ContextDossier;
@@ -60,7 +61,7 @@ public sealed record DossierSelectionPlan(
     string? Status,
     string? ScopeDimension,
     bool IncludeHistory,
-    DateTimeOffset? AsOf,
+    Instant? AsOf,
     int WidenDepth,
     string CombinationRule,
     string HistoryPolicy,
@@ -69,6 +70,10 @@ public sealed record DossierSelectionPlan(
 /// <summary>
 /// What the selection reached and what it stopped short of. No hidden count is disclosed (NFR-01);
 /// <see cref="HiddenPathDropped"/> is a generic disclosure, not an itemized list.
+/// <para>
+/// <see cref="ReferencedAnchors"/> is how many of the anchors reached a memory through an <c>ABOUT</c>
+/// reference rather than ticket ownership/hierarchy, so a reader can tell originals from copies.
+/// </para>
 /// </summary>
 public sealed record DossierReach(
     int WidenDepth,
@@ -76,7 +81,8 @@ public sealed record DossierReach(
     int Widened,
     int Selected,
     int Edges,
-    bool HiddenPathDropped);
+    bool HiddenPathDropped,
+    int ReferencedAnchors);
 
 /// <summary>One limit actually reached, named (NFR-03).</summary>
 public sealed record DossierLimitHit(string Limit, int Value);
@@ -107,7 +113,7 @@ public sealed record DossierManifest(
 public sealed record DossierOmittedItem(Guid Uuid, int Version, string Reason);
 
 /// <summary>One source document citation (NFR-05).</summary>
-public sealed record DossierSource(string Kind, string Reference, DateTimeOffset? CapturedAt);
+public sealed record DossierSource(string Kind, string Reference, Instant? CapturedAt);
 
 public static class DossierBodyState
 {
@@ -138,11 +144,11 @@ public sealed record DossierMemory(
     short Confidence,
     string ScopeDimension,
     string? ScopeIdentifier,
-    DateTimeOffset ValidFrom,
-    DateTimeOffset? ValidUntil,
+    Instant ValidFrom,
+    Instant? ValidUntil,
     int Version,
     bool IsCurrent,
-    DateTimeOffset CreatedOn,
+    Instant CreatedOn,
     IReadOnlyList<DossierSource> Sources,
     string? BodyText,
     string BodyState,

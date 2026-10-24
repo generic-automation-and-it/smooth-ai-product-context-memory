@@ -74,7 +74,14 @@ public sealed record SnapshotCounts(
     int Objects,
     int TicketVertices,
     int TicketEdges,
+    int AboutEdges,
+    int ProductVertices,
+    int InitiativeVertices,
+    int RepoVertices,
+    int ProductInitiativeEdges,
+    int ProductRepoEdges,
     int OperationReceipts = 0);
+
 
 /// <summary>What is deliberately absent from the archive, stated rather than reported as loss.</summary>
 public sealed record SnapshotExclusions(IReadOnlyList<string> Items);
@@ -89,8 +96,17 @@ public static class SnapshotFormat
     // body's MIME type from content, so the loss begins at capture; archives written before the
     // field existed (v2, field absent→null) would restore bodies as application/octet-stream, so
     // they carry the same refusal semantics as v2.
-    public const int Version = 4;
-    public static bool IsSupported(int version) => version is 3 or Version;
+    // v4: product-name graph members (Product/Initiative/Repo vertices and HAS_INITIATIVE/HAS_REPO
+    // edges) were added to the archive and SnapshotCounts. Archives written before those members
+    // existed (v3, members absent) would restore zero product links, so they are refused at the
+    // manifest version gate (HLD-003 LADR-10).
+    // v5: ABOUT memory→ticket reference edges were added to the archive and SnapshotCounts. Archives
+    // written before them (v4, members absent) would silently drop every reference on restore, so
+    // they are refused at the manifest version gate.
+    public const int Version = 6;
+    // v6 adds operation receipts without dropping v5 graph members.
+    // Earlier branch-specific v4 archives require explicit migration.
+    public static bool IsSupported(int version) => version is 5 or Version;
 }
 
 /// <summary>Canonical logical names for archive members that are not blob bodies.</summary>
@@ -107,5 +123,11 @@ public static class SnapshotEntryNames
     public const string Edges = "graph/edges.json";
     public const string TicketVertices = "graph/ticket_vertices.json";
     public const string TicketEdges = "graph/ticket_edges.json";
+    public const string AboutEdges = "graph/about_edges.json";
+    public const string ProductVertices = "graph/product_vertices.json";
+    public const string InitiativeVertices = "graph/initiative_vertices.json";
+    public const string RepoVertices = "graph/repo_vertices.json";
+    public const string ProductInitiativeEdges = "graph/product_initiative_edges.json";
+    public const string ProductRepoEdges = "graph/product_repo_edges.json";
     public const string OperationReceipts = "relational/operation_receipt.json";
 }

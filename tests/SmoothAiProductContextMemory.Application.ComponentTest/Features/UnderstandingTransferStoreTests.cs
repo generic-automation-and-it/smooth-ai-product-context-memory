@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -136,7 +137,7 @@ public sealed class UnderstandingTransferStoreTests(AspireFixture aspire) : Hand
         loaded.Uuid.ShouldBe(seeded.Understanding);
         loaded.Version.ShouldBe(current.Version);
         loaded.Version.ShouldBe(2);
-        loaded.CreatedOn.ShouldBe(current.CreatedOn, TimeSpan.FromMilliseconds(1));
+        loaded.CreatedOn.ShouldBe(current.CreatedOn);
         loaded.Kind.ShouldBe(MemoryVersion.KindValue.Understanding);
     }
 
@@ -212,10 +213,10 @@ public sealed class UnderstandingTransferStoreTests(AspireFixture aspire) : Hand
     }
 
     private SetMemories.Handler NewSet() =>
-        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
+        new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
 
     private QueryMemories.Handler NewQuery() =>
-        new(AppDb, Search, new NoopRecallFeedback(), Loggers.CreateLogger<QueryMemories.Handler>());
+        new(AppDb, Search, new NoopRecallFeedback(), ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
 
     private ExportStore.Handler NewExport(IBlobStorage blobs) =>
         new(AppDb, Graph, blobs, new FileSystemMarkdownExportSink(NullLogger<FileSystemMarkdownExportSink>.Instance),
@@ -282,7 +283,7 @@ public sealed class UnderstandingTransferStoreTests(AspireFixture aspire) : Hand
                     Confidence: 80,
                     Content: "blob-body",
                     Sources: null,
-                    ValidFrom: DateTimeOffset.UtcNow.AddDays(-1),
+                    ValidFrom: SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1)),
                     ValidUntil: null,
                     SummaryModel: "test-model",
                     SummaryPromptVersion: "prompt-1")

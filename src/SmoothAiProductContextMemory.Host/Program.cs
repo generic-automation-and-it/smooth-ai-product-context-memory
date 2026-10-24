@@ -1,3 +1,5 @@
+using NodaTime;
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Text.Json.Serialization;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
@@ -52,9 +54,23 @@ builder.Services.AddSingleton<SnapshotJobCoordinator>();
 // `initiative` where the contract says `initiativeName`) was absorbed silently and the request
 // proceeded with a default, so rejection must be explicit and consistent across every endpoint.
 builder.Services.ConfigureHttpJsonOptions(options =>
-    options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow);
+{
+    options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow;
+    InstantJson.Configure(options.SerializerOptions);
+});
 builder.Services.AddOpenApi(options =>
 {
+    options.AddSchemaTransformer((schema, context, _) =>
+    {
+        if (context.JsonTypeInfo.Type == typeof(Instant) || context.JsonTypeInfo.Type == typeof(Instant?))
+        {
+            schema.Type = JsonSchemaType.String;
+            schema.Format = "date-time";
+            schema.Properties?.Clear();
+            schema.Required?.Clear();
+        }
+        return Task.CompletedTask;
+    });
     options.CreateSchemaReferenceId = type => type.Type.FullName?.Replace('+', '.');
     options.AddDocumentTransformer((document, _, _) =>
     {

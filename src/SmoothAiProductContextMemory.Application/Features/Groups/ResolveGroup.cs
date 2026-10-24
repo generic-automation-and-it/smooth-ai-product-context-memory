@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -135,7 +136,7 @@ public static class ResolveGroup
                 Repo = request.Repo,
                 RepoUrl = request.RepoUrl,
                 Tickets = tickets,
-                CreatedOn = DateTimeOffset.UtcNow,
+                CreatedOn = SystemClock.Instance.GetCurrentInstant(),
             };
 
             db.MemoryGroups.Add(group);
@@ -148,7 +149,7 @@ public static class ResolveGroup
                     Version = 1,
                     Name = request.Name ?? string.Empty,
                     Body = request.Body ?? string.Empty,
-                    CreatedOn = DateTimeOffset.UtcNow,
+                    CreatedOn = SystemClock.Instance.GetCurrentInstant(),
                 });
             }
 

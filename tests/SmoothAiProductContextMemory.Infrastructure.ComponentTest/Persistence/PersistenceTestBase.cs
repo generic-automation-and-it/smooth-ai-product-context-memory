@@ -45,7 +45,7 @@ public abstract class PersistenceTestBase(AspireFixture aspire) : IAsyncLifetime
         await ApplyMigrationsAsync(_dataSource, Ct);
 
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(_dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+            .UseNpgsql(_dataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory())
             .Options;
 
         Db = new SmoothAiProductContextMemoryDbContext(options);
@@ -74,7 +74,7 @@ public abstract class PersistenceTestBase(AspireFixture aspire) : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddSingleton(dataSource);
         services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
-            options.UseNpgsql(dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory()));
+            options.UseNpgsql(dataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory()));
 
         await using ServiceProvider provider = services.BuildServiceProvider();
         await provider.MigrateSmoothAiProductContextMemoryAsync(cancellationToken);

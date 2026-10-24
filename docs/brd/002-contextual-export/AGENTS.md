@@ -60,6 +60,7 @@ Design follow-up after review of the revised business requirements:
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-05 | §5 in-scope "a portable local file" now says that file is the one deliverable and that the composition's intermediates (the saved bundle, the skill's judgement inputs) are transient, kept out of version control and removed when composition ends. The dossier skill's documented workflow saves both to a gitignored scratch directory, which the previous wording did not admit. No requirement changes. | issue 182 |
 | 2026-09-19 | Scoped the no-import stance to the contextual document and cross-referenced BRD 003 (understanding load/import + current-session export, BR-38…BR-45) in §5 out-of-scope, §10 glossary and §11 Related. The dossier stays one-way. | BRD-003 |
 | 2026-09-13 | Refined the PM grounding workflow, fidelity and lifecycle acceptance criteria, bounded gap findings, snapshot meaning and size preview; preserved BR-18 … BR-34 and single-user scope. Recorded downstream design alignment separately from business requirements. | BRD-002 §§4, 6–8 |
 | 2026-09-13 | Created — BRD-002 for contextual knowledge export. Continues BRD-001's requirement space at `BR-18`; adds BO-6 … BO-10; closes BRD-001's recorded "BRD does not mention export at all" gap for the curated case. | HLD 005 |

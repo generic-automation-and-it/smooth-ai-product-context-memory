@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -88,11 +89,11 @@ public sealed class RestoreArchiveHandlerTests
             [],
             [],
             [new Memory { Id = 1, Uuid = Guid.NewGuid(), LineageId = Guid.NewGuid(), GroupId = 1, Name = "m", Description = "d", SubjectSlug = "d" }],
-            [new MemoryVersion { Id = 1, MemoryId = 1, Version = 1, IsCurrent = true, Statement = "s", ContentSummary = "c", BlobAddress = address, Kind = "decision", Confidence = 5, Status = "approved", ValidFrom = DateTimeOffset.UtcNow, CreatedOn = DateTimeOffset.UtcNow }],
+            [new MemoryVersion { Id = 1, MemoryId = 1, Version = 1, IsCurrent = true, Statement = "s", ContentSummary = "c", BlobAddress = address, Kind = "decision", Confidence = 5, Status = "approved", ValidFrom = SystemClock.Instance.GetCurrentInstant(), CreatedOn = SystemClock.Instance.GetCurrentInstant() }],
             [],
             [],
             [],
-            []);
+            [], [], [], [], [], [], []);
 
     private sealed class FakeArchive(string address, byte[] archivedBody, string? contentType) : ISnapshotArchive
     {
@@ -108,7 +109,7 @@ public sealed class RestoreArchiveHandlerTests
             var manifest = new SnapshotManifest(
                 SnapshotFormat.Version,
                 [new SnapshotArchiveEntry($"blobs/{address}", "unused", archivedBody.Length, contentType)],
-                new SnapshotCounts(1, 1, 0, 0, 1, 0, 0),
+                new SnapshotCounts(1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0),
                 new SnapshotExclusions(["recall_feedback"]));
             return Task.FromResult(new SnapshotArchive(
                 manifest,
@@ -179,6 +180,12 @@ public sealed class RestoreArchiveHandlerTests
                 expected.Edges,
                 expected.TicketVertices,
                 expected.TicketEdges,
+                expected.AboutEdges,
+                expected.ProductVertices,
+                expected.InitiativeVertices,
+                expected.RepoVertices,
+                expected.ProductInitiativeEdges,
+                expected.ProductRepoEdges,
                 expected.Edges,
                 Committed: true));
         }

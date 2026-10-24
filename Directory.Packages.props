@@ -38,9 +38,17 @@
     <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.0" />
     <PackageVersion Include="Mediator.Abstractions" Version="3.0.2" />
     <PackageVersion Include="Mediator.SourceGenerator" Version="3.0.2" />
-    <!-- MessagePack pinned transitively (via Aspire) to the patched 2.5.301+ line — fixes NU1902/NU1903 audit advisories on CI. -->
-    <PackageVersion Include="MessagePack" Version="2.5.302" />
+    <!-- MessagePack pinned transitively (via Aspire) to the patched 2.5.303+ line — fixes the NU1902
+         audit advisories on CI. GHSA-qhrr-8q5h-9q3h / CVE-2026-92707 (moderate, published 2026-10-15)
+         covers < 2.5.303: nested arrays allocated before the object-graph depth check, ~3800x
+         amplification from a 31.5 KiB payload. Audit only; the AppHost does not enable the
+         MessagePack hub protocol, so nothing here deserializes attacker-controlled `object`. -->
+    <PackageVersion Include="MessagePack" Version="2.5.303" />
     <PackageVersion Include="Minio" Version="7.0.0" />
+    <PackageVersion Include="NodaTime" Version="3.3.5" />
+    <PackageVersion Include="NodaTime.Serialization.SystemTextJson" Version="1.4.0" />
+    <PackageVersion Include="Npgsql.NodaTime" Version="10.0.0" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL.NodaTime" Version="10.0.0" />
     <PackageVersion Include="Npgsql" Version="10.0.0" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />

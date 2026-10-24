@@ -9,6 +9,12 @@ and release gates passed on 2026-09-15. Tag half remains **Blocked**.
 > **Remaining tag blocker:** LADR-10's tag identity/synonym decision must clear, then HLD-002 must
 > decide its writer. Ticket approval does not provide a tag writer or authorize derivation.
 
+> **One narrow exception added 2026-10-16:**
+> [HLD-003 LADR-09](../../003-graph-edges-on-age/ladrs/LADR-09-memory-references-ticket.md) declares one
+> further anchor edge, `(Memory)-[:ABOUT]->(Ticket)`, written only by an explicit `ticketReferences`
+> binding or the `ticket-references` route. The dossier reads it (the ticket anchor's reference union);
+> the rule here — no writer **derives** an anchor edge — is unchanged, and the tag half stays Blocked.
+
 ## Context
 
 LADR-09 and LADR-10 originally blocked on *representation*. LADR-09 is now resolved for declared

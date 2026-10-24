@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -20,8 +22,8 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
 
     public DossierBundleHandlerTests(AspireFixture aspire) : base(aspire) => _aspire = aspire;
 
-    private static readonly DateTimeOffset ValidFrom = new(2024, 3, 1, 12, 0, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset CreatedOn = new(2024, 3, 2, 9, 0, 0, TimeSpan.Zero);
+    private static readonly Instant ValidFrom = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 1, 12, 0, 0, TimeSpan.Zero));
+    private static readonly Instant CreatedOn = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 2, 9, 0, 0, TimeSpan.Zero));
     private static readonly Guid ProductGroupUuid = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid ProgramGroupUuid = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid AnchorUuid = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -200,6 +202,43 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     }
 
     [Fact]
+    public async Task Ticket_anchor_includes_references_and_reports_referencedAnchors()
+    {
+        var owner = Group(Guid.NewGuid(), MemoryGroup.ScopeDimensionValue.Product);
+        owner.Tickets = [TicketDocument.Create("jira", "ACM-999", "https://tracker/ACM-999")];
+        Db.MemoryGroups.Add(owner);
+        await Db.SaveChangesAsync(Ct);
+
+        var refGroup = Group(Guid.NewGuid(), MemoryGroup.ScopeDimensionValue.Product);
+        Db.MemoryGroups.Add(refGroup);
+        await Db.SaveChangesAsync(Ct);
+
+        Memory ownerMem = MemoryRow(owner.Id, Guid.NewGuid(), "Owner", "Owner fact", ["tag-1"], "architecture");
+        Memory refMem = MemoryRow(refGroup.Id, Guid.NewGuid(), "Reference", "Reference fact", ["tag-1"], "architecture");
+        Db.Memories.AddRange(ownerMem, refMem);
+        await Db.SaveChangesAsync(Ct);
+
+        Db.MemoryVersions.Add(Version(ownerMem.Id, 1, "owner claim", true, MemoryVersion.KindValue.Decision));
+        Db.MemoryVersions.Add(Version(refMem.Id, 1, "reference claim", true, MemoryVersion.KindValue.Decision));
+        await Db.SaveChangesAsync(Ct);
+
+        await Graph.CreateAboutAsync(refMem.Uuid, "jira", "ACM-999", "about ref", Ct);
+
+        var blobs = new DictionaryBlobStorage();
+        CreateDossierBundle.Response response = await BundleHandler(blobs)
+            .Handle(BundleRequest(ticketProvider: "jira", ticketKey: "ACM-999"), Ct);
+
+        // The reference copy is an anchor reached through ABOUT, so it is selected and disclosed as
+        // a reference rather than as an owned/hierarchy identity. Both sides of the union are
+        // asserted: a regression that keeps references but drops owned identities must not green.
+        response.Bundle.Manifest.NoMatch.ShouldBeFalse();
+        response.Bundle.Manifest.Reach.ReferencedAnchors.ShouldBe(1);
+        response.Bundle.Manifest.Reach.Anchors.ShouldBe(2);
+        response.Bundle.Items.ShouldContain(i => i.Statement == "owner claim");
+        response.Bundle.Items.ShouldContain(i => i.Statement == "reference claim");
+    }
+
+    [Fact]
     public async Task Ticket_anchor_with_a_status_reaches_the_memory_the_manifest_says_it_reached()
     {
         // The ticket traversal's identity set is the filter the anchor search then applies its own
@@ -297,8 +336,8 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     {
         // 02:00 at +02:00 is midnight UTC, and the future rows start at 01:00 UTC. A handler that read
         // the offset as wall-clock time would admit them; one that did not normalise would throw.
-        DateTimeOffset asOf = new(2024, 3, 10, 2, 0, 0, TimeSpan.FromHours(2));
-        await SeedForAsOfAsync(future: new DateTimeOffset(2024, 3, 10, 1, 0, 0, TimeSpan.Zero));
+        Instant asOf = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 10, 2, 0, 0, TimeSpan.FromHours(2)));
+        await SeedForAsOfAsync(future: Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 10, 1, 0, 0, TimeSpan.Zero)));
         CreateDossierBundle.Handler handler = BundleHandler(new DictionaryBlobStorage());
 
         CreateDossierBundle.Response unbounded = await handler.Handle(BundleRequest(), Ct);
@@ -397,7 +436,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         NpgsqlDataSource dataSource = NpgsqlDataSourceFactory.Create(
             _aspire.CreateDatabaseConnectionString(CurrentDatabaseName()));
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+            .UseNpgsql(dataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory())
             .Options;
         return new RestartLine(new SmoothAiProductContextMemoryDbContext(options), dataSource);
     }
@@ -409,7 +448,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     }
 
     private static byte[] SerializeToBytes(object value) =>
-        JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        JsonSerializer.SerializeToUtf8Bytes(value, InstantJson.Configure(new JsonSerializerOptions(JsonSerializerDefaults.Web)));
 
     private sealed record RestartLine(SmoothAiProductContextMemoryDbContext Db, NpgsqlDataSource DataSource) : IAsyncDisposable
     {
@@ -421,11 +460,11 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     }
 
     private static string Serialize(object value) =>
-        JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        JsonSerializer.Serialize(value, InstantJson.Configure(new JsonSerializerOptions(JsonSerializerDefaults.Web)));
 
     private static CreateDossierBundle.Request BundleRequest(
         IReadOnlyList<string>? tags = null, string? ticketProvider = null, string? ticketKey = null,
-        bool includeHistory = false, string? status = null, DateTimeOffset? asOf = null) =>
+        bool includeHistory = false, string? status = null, Instant? asOf = null) =>
         new(
             Repo: "kingstown",
             InitiativeName: null,
@@ -550,17 +589,17 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         await Db.SaveChangesAsync(Ct);
 
         Db.MemoryVersions.Add(Version(first.Id, 1, "First v1", isCurrent: false, kind: MemoryVersion.KindValue.Decision,
-            validFrom: ValidFrom.AddDays(-10)));
+            validFrom: ValidFrom.Plus(Duration.FromDays(-10))));
         Db.MemoryVersions.Add(Version(first.Id, 2, "First v2", isCurrent: true, kind: MemoryVersion.KindValue.Decision,
-            validFrom: ValidFrom.AddDays(5)));
+            validFrom: ValidFrom.Plus(Duration.FromDays(5))));
         Db.MemoryVersions.Add(Version(tieHigh.Id, 1, "Tie high", isCurrent: true, kind: MemoryVersion.KindValue.Decision));
         Db.MemoryVersions.Add(Version(laterCapture.Id, 1, "Later", isCurrent: true, kind: MemoryVersion.KindValue.Decision,
-            createdOn: CreatedOn.AddHours(1)));
+            createdOn: CreatedOn.Plus(Duration.FromHours(1))));
         Db.MemoryVersions.Add(Version(tieLow.Id, 1, "Tie low", isCurrent: true, kind: MemoryVersion.KindValue.Decision));
         await Db.SaveChangesAsync(Ct);
     }
 
-    private async Task SeedForAsOfAsync(DateTimeOffset future)
+    private async Task SeedForAsOfAsync(Instant future)
     {
         MemoryGroup product = Group(ProductGroupUuid, MemoryGroup.ScopeDimensionValue.Product);
         Db.MemoryGroups.Add(product);
@@ -646,8 +685,8 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
 
     private static MemoryVersion Version(
         long memoryId, int version, string statement, bool isCurrent, string kind, string? blobAddress = null,
-        string status = MemoryVersion.MemoryVersionStatus.Approved, DateTimeOffset? validFrom = null,
-        DateTimeOffset? createdOn = null) => new()
+        string status = MemoryVersion.MemoryVersionStatus.Approved, Instant? validFrom = null,
+        Instant? createdOn = null) => new()
         {
             MemoryId = memoryId,
             Version = version,

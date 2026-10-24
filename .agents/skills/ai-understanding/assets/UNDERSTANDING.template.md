@@ -10,6 +10,11 @@ agents_context: <path/to/nearest/AGENTS.md — omit if this bears on no specific
 recheck: <OPTIONAL. One command that tests whether this still holds, runnable exactly as written; --review prints it beside a staleness flag. Do not use a text-search command as proof; omit if nothing executable can check it>
 skills:
   - <OPTIONAL. Bare name of a skill to invoke to act on this knowledge, never a reference and never knowledge *about* the skill, which belongs in that skill's AGENTS.md. Omit the list if none>
+audience:
+  - <OPTIONAL. A role the value gate found above threshold when it scored this unit, e.g. developer. Written only when the gate ran; if no role cleared the bar, omit the list>
+value: <OPTIONAL. below-threshold — set by the value gate when a unit was written under mark. Omit otherwise>
+decisions:
+  - <OPTIONAL. One line per role the gate scored, e.g. developer: 0.87 — the evidence behind audience: / value:. Omit absent scoring>
 provenance:
   learned: <YYYY-MM-DD>
   session: <shared by every slug exported from the same session>

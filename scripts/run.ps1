@@ -27,6 +27,12 @@
         /host_mnt prefix that macOS and Linux Desktop report. A data root here would therefore fail
         its backing check. Pass -DataRoot to opt in; that path is unverified on Windows.
 
+    Client settings are environment variables. CONTEXT_MEMORY_BASE_URL, CONTEXT_MEMORY_READ_TOKEN and
+    CONTEXT_MEMORY_WRITE_TOKEN, when already set, are the master: the controller is started on the
+    base URL's port and with those tokens. On Windows, anything missing is published as a User-scope
+    environment variable - except the write token, which lives in <data home>\credentials, because a
+    write token in the environment reaches every process and the read client refuses to run beside one.
+
 .PARAMETER Verb
     up (default, and a restart when one is already running), env, status, stop, logs.
 
@@ -85,7 +91,9 @@ if (Get-Variable -Name PSNativeCommandArgumentPassing -ErrorAction SilentlyConti
 $script:ControllerName = "mimisbrunnr-$Id-controller"
 $script:StateVolume = "mimisbrunnr-$Id-controller-state"
 $script:GroupName = "smooth-mímisbrunnr-release-$Id"
-$script:UseDataRoot = $null -ne $DataRoot
+# A [string] parameter that was never passed is "", not $null, so testing for $null made every run take
+# the data-root branch and die in Split-Path on an empty path.
+$script:UseDataRoot = -not [string]::IsNullOrEmpty($DataRoot)
 # The credential file sits in the data *home*, one level above the volumes folder - the same place
 # run.sh puts it. Deriving the home as the parent of an explicitly-given -DataRoot wrote controller.env
 # to $HOME\controller.env instead, so an operator moving an installation between the two launchers did
@@ -98,6 +106,7 @@ $script:DataHome = if ($script:UseDataRoot) {
 else { Join-Path $HOME '.mimisbrunnr' }
 $script:VolumesRoot = if ($script:UseDataRoot) { $DataRoot } else { Join-Path $script:DataHome 'volumes' }
 $script:EnvFile = Join-Path $script:DataHome 'controller.env'
+$script:MachineCredentials = if ($env:MIMIS_MACHINE_CREDENTIALS) { $env:MIMIS_MACHINE_CREDENTIALS } else { Join-Path $script:DataHome 'credentials' }
 $script:ContainerDataRoot = '/var/lib/mimisbrunnr-data'
 $script:DashboardHost = "http://localhost:$DashboardPort"
 $script:OnWindows = $IsWindows
@@ -114,6 +123,35 @@ function Write-Info { param([string] $Message) Write-Host "run.ps1: $Message" }
 # One line on stderr, matching run.sh. Write-Error would render a full error record - position, line
 # frame and all - which buries the one sentence the operator has to act on.
 function Fail { param([string] $Message) [Console]::Error.WriteLine("run.ps1: $Message"); exit 1 }
+
+# The value the operator configured: the process environment, else the User scope a previous run
+# published to - a terminal opened before that run has not inherited it, and treating the setting as
+# absent there would publish a second, different value over the operator's own.
+function Get-ClientSetting {
+    param([string] $Name)
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if (-not $value -and $script:OnWindows) { $value = [Environment]::GetEnvironmentVariable($Name, 'User') }
+    return $value
+}
+
+# CONTEXT_MEMORY_BASE_URL is the master when it exists: the API is published on its port, so every
+# client holding it reaches this stack. An explicit -HostPort that disagrees is refused rather than
+# resolved, because either answer silently strands one side.
+$script:MasterBaseUrl = Get-ClientSetting 'CONTEXT_MEMORY_BASE_URL'
+if ($script:MasterBaseUrl) {
+    if ($script:MasterBaseUrl -notmatch '^http://(localhost|127\.0\.0\.1|\[::1\]):(\d+)/?$') {
+        Fail "CONTEXT_MEMORY_BASE_URL must be http://localhost:<port> (loopback, explicit port), not '$($script:MasterBaseUrl)'"
+    }
+    $masterPort = [int] $Matches[2]
+    if ($PSBoundParameters.ContainsKey('HostPort') -and $HostPort -ne $masterPort) {
+        Fail "-HostPort $HostPort disagrees with CONTEXT_MEMORY_BASE_URL=$($script:MasterBaseUrl); the base URL is the master - change it there"
+    }
+    $HostPort = $masterPort
+    $script:ApiBaseUrl = $script:MasterBaseUrl.TrimEnd('/')
+}
+else {
+    $script:ApiBaseUrl = "http://localhost:$HostPort"
+}
 
 function Invoke-Docker {
     param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments)
@@ -159,9 +197,9 @@ function New-Secret {
 }
 
 function Get-StoredSecret {
-    param([string] $Key)
-    if (-not (Test-Path -LiteralPath $script:EnvFile)) { return $null }
-    foreach ($line in [System.IO.File]::ReadAllLines($script:EnvFile)) {
+    param([string] $Key, [string] $Path = $script:EnvFile)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
         if ($line.StartsWith("$Key=")) { return $line.Substring($Key.Length + 1) }
     }
     return $null
@@ -224,15 +262,31 @@ function Initialize-Credentials {
     # credentials, and every call is a 403. Read as a pair or not at all.
     $adopted = Get-ProvisionedTokenPair
 
+    # The client tokens the operator already holds are the master: the Host is started with them, so
+    # every client reading CONTEXT_MEMORY_* reaches it without a 403. The write token is also looked up
+    # in the machine credential file, because that - not the environment - is where it lives.
+    $master = @{
+        'Parameters__api-read-token'  = Get-ClientSetting 'CONTEXT_MEMORY_READ_TOKEN'
+        'Parameters__api-write-token' = Get-ClientSetting 'CONTEXT_MEMORY_WRITE_TOKEN'
+    }
+    if (-not $master['Parameters__api-write-token']) {
+        $master['Parameters__api-write-token'] = Get-StoredSecret -Key 'CONTEXT_MEMORY_WRITE_TOKEN' -Path $script:MachineCredentials
+    }
+    $mastered = 0
+
     foreach ($key in $keys) {
         # [Environment]::GetEnvironmentVariable takes the name as a string, so the hyphenated
         # parameter names work where `export Parameters__api-read-token=...` would be a syntax error.
         $fromEnv = [Environment]::GetEnvironmentVariable($key)
         $stored = Get-StoredSecret -Key $key
+        $fromMaster = $master[$key]
 
         if ($fromEnv) {
             $effective[$key] = $fromEnv
             $fromEnvironment++
+        }
+        elseif ($fromMaster) {
+            $effective[$key] = $fromMaster
         }
         elseif ($stored) {
             $effective[$key] = $stored
@@ -249,17 +303,24 @@ function Initialize-Credentials {
             $generated++
         }
 
-        # Only ever fill gaps. An earlier draft persisted just the values this run selected, so
-        # exporting one variable silently dropped the stored token for it - and the next run without
-        # that variable minted a different one, 403ing a Host already running with the old value.
-        if ($stored) { $persisted[$key] = $stored } else { $persisted[$key] = $effective[$key]; $missing++ }
+        # Fill gaps and follow the master; never otherwise drop a stored value. An earlier draft
+        # persisted just the values this run selected, so exporting one Parameters__* variable silently
+        # dropped the stored token for it - and the next run without that variable minted a different
+        # one, 403ing a Host already running with the old value. A master token is what every client
+        # holds, so the stored copy follows it.
+        if ($fromMaster) {
+            $persisted[$key] = $fromMaster
+            if ($fromMaster -ne $stored) { $mastered++ }
+        }
+        elseif ($stored) { $persisted[$key] = $stored }
+        else { $persisted[$key] = $effective[$key]; $missing++ }
     }
 
     $read = $effective['Parameters__api-read-token']
     $write = $effective['Parameters__api-write-token']
     if ($read -eq $write) { Fail 'read and write tokens are identical; the read/write capability split would be void' }
 
-    if ($missing -gt 0) {
+    if ($missing -gt 0 -or $mastered -gt 0) {
         New-Item -ItemType Directory -Force -Path $script:DataHome | Out-Null
         $lines = @(
             "# Release-controller secrets for installation '$Id'.",
@@ -274,7 +335,7 @@ function Initialize-Credentials {
         [System.IO.File]::WriteAllLines($temp, $lines, [System.Text.UTF8Encoding]::new($false))
         Move-Item -LiteralPath $temp -Destination $script:EnvFile -Force
         $script:TempEnvFile = $null
-        Write-Info "wrote $($script:EnvFile) - $generated generated, $adoptedCount adopted from provision-credentials.sh, $missing new"
+        Write-Info "wrote $($script:EnvFile) - $generated generated, $adoptedCount adopted from provision-credentials.sh, $missing new, $mastered taken from your CONTEXT_MEMORY_* tokens"
         if ($adoptedCount -gt 0) {
             Write-Info '  tokens match the CONTEXT_MEMORY_* values your skills hold, so they will not 403'
         }
@@ -289,6 +350,8 @@ function Initialize-Credentials {
         if ($LASTEXITCODE -ne 0) { Fail "cannot restrict permissions on $($script:EnvFile)" }
     }
 
+    Publish-ClientSettings -ReadToken $persisted['Parameters__api-read-token'] -WriteToken $persisted['Parameters__api-write-token']
+
     if ($fromEnvironment -gt 0) {
         Write-Info "NOTE: $fromEnvironment secret(s) came from your environment and are not stored."
         Write-Info '      Re-export them next run, or the running Host''s tokens change and every skill 403s.'
@@ -299,6 +362,90 @@ function Initialize-Credentials {
     }
 
     return $effective
+}
+
+# The decision-gate settings at their defaults, in the same order as run.sh's table. The API key is
+# absent on purpose: it is not a generated secret, and a hosted endpoint's key is the operator's to set.
+$script:DecisionDefaults = [ordered]@{
+    CONTEXT_MEMORY_DECISIONS_ENABLED                       = 'false'
+    CONTEXT_MEMORY_DECISIONS_BASE_URL                      = 'http://localhost:11434'
+    CONTEXT_MEMORY_DECISIONS_PATH                          = '/v1/systemone'
+    CONTEXT_MEMORY_DECISIONS_MODEL                         = 'nimble'
+    CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY               = '0.85'
+    CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS                  = '3'
+    CONTEXT_MEMORY_DECISIONS_ROLES                         = 'product-owner,designer,developer,tester,business'
+    CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD               = 'hold'
+    CONTEXT_MEMORY_DECISIONS_TIMEOUT                       = '30'
+    CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED                 = 'false'
+    CONTEXT_MEMORY_DECISIONS_DEDUP_MIN_PROBABILITY         = '0.5'
+    CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_PAIRS_PER_CANDIDATE = '3'
+    CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_PAIRS_PER_BATCH     = '20'
+    CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_RESULTS             = '5'
+}
+
+# The write token is the one client credential that is not an environment variable: one there reaches
+# every process the session starts, and the read client refuses to start beside a write token. It is
+# published to a file only the capture client reads, rewritten whole because it holds exactly one key.
+function Write-WriteTokenFile {
+    param([string] $Token)
+    $path = $script:MachineCredentials
+    if (Test-Path -LiteralPath $path) {
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.LinkType) { Fail "$path is a $($item.LinkType); refusing to write secrets through it" }
+        if ($item.PSIsContainer) { Fail "$path is a directory; refusing to write secrets into it" }
+    }
+    $lines = @(
+        '# Mimisbrunnr write token - machine level, outside any repository.',
+        '# Written by run.ps1. Read by the capture client only when CONTEXT_MEMORY_WRITE_TOKEN is not',
+        '# in its environment. Every other client setting is an environment variable.',
+        "CONTEXT_MEMORY_WRITE_TOKEN=$Token"
+    )
+    $current = if (Test-Path -LiteralPath $path) { [System.IO.File]::ReadAllLines($path) } else { @() }
+    if (($current -join "`n") -ne ($lines -join "`n")) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+        $temp = "$path.tmp$PID"
+        $script:TempEnvFile = $temp
+        [System.IO.File]::WriteAllLines($temp, $lines, [System.Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temp -Destination $path -Force
+        $script:TempEnvFile = $null
+        Write-Info "write token published: $path"
+    }
+    if (-not $script:OnWindows) {
+        & chmod 600 $path
+        if ($LASTEXITCODE -ne 0) { Fail "cannot restrict permissions on $path" }
+    }
+}
+
+# Publish every missing client setting as a User-scope environment variable, add-only: a setting the
+# operator already has - in this process or in the User scope - is never added again and never changed,
+# so a hand-tuned value survives every run. The one removal is a User-scope write token, which is the
+# master for this run and is in the credential file now.
+function Publish-ClientSettings {
+    param([string] $ReadToken, [string] $WriteToken)
+    Write-WriteTokenFile -Token $WriteToken
+    if (-not $script:OnWindows) {
+        Write-Info 'NOTE: User-scope environment variables are Windows-only; on macOS/Linux run.sh writes them to your shell profile.'
+        return
+    }
+    $settings = [ordered]@{
+        CONTEXT_MEMORY_BASE_URL   = $script:ApiBaseUrl
+        CONTEXT_MEMORY_READ_TOKEN = $ReadToken
+    }
+    foreach ($entry in $script:DecisionDefaults.GetEnumerator()) { $settings[$entry.Key] = $entry.Value }
+    $added = 0
+    foreach ($entry in $settings.GetEnumerator()) {
+        if (Get-ClientSetting $entry.Key) { continue }
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'User')
+        $added++
+    }
+    if ([Environment]::GetEnvironmentVariable('CONTEXT_MEMORY_WRITE_TOKEN', 'User')) {
+        [Environment]::SetEnvironmentVariable('CONTEXT_MEMORY_WRITE_TOKEN', $null, 'User')
+        Write-Info "removed the User-scope CONTEXT_MEMORY_WRITE_TOKEN; it lives in $($script:MachineCredentials)"
+    }
+    if ($added -gt 0) { Write-Info "published $added missing setting(s) as User environment variables; open a new terminal to load them" }
+    if ([Environment]::GetEnvironmentVariable('CONTEXT_MEMORY_WRITE_TOKEN')) {
+        Write-Info 'NOTE: CONTEXT_MEMORY_WRITE_TOKEN is set in this session; a read client started from it refuses to run.'
+    }
 }
 
 # ---------------------------------------------------------------------------------------------

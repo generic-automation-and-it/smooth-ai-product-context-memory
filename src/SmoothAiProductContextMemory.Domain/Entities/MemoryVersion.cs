@@ -1,3 +1,4 @@
+using NodaTime;
 namespace SmoothAiProductContextMemory.Domain.Entities;
 
 /// <summary>
@@ -38,11 +39,11 @@ public sealed class MemoryVersion
     /// <summary>JSONB array of source documents, each carrying its own <c>v</c> shape marker.</summary>
     public List<SourceDocument> Sources { get; set; } = [];
 
-    public DateTimeOffset ValidFrom { get; set; }
+    public Instant ValidFrom { get; set; }
 
-    public DateTimeOffset? ValidUntil { get; set; }
+    public Instant? ValidUntil { get; set; }
 
-    public DateTimeOffset CreatedOn { get; set; }
+    public Instant CreatedOn { get; set; }
 
     /// <summary>D42 stamp — model identifier and prompt version used to generate <see cref="ContentSummary"/>.</summary>
     public SummaryStampDocument? SummaryStamp { get; set; }

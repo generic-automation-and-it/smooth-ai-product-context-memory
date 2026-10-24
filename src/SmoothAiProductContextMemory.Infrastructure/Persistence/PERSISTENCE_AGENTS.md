@@ -77,6 +77,9 @@ erDiagram
 
 ## Key Behaviors
 
+- **All timestamp values are absolute `Instant`s.** Native `UseNodaTime` is required on both the pooled Npgsql data source and EF options, including design-time/scratch/test contexts. `timestamptz` retains the same schema; no wall-clock reinterpretation, offset state or legacy timestamp behavior switch. JSONB and graph provenance are emitted as canonical UTC Z; existing explicit-offset stored JSON is parsed into the same instant.
+
+
 - **Subject/claim**: `description` (stable, what dedup matches on) vs `statement` (volatile, what versioning replaces) must never be collapsed — that would destroy "same subject, new claim".
 - **`sources` sits on the version**, because provenance records where *this claim* came from. v1 and v2 legitimately carry different sources.
 - **`is_current` flag**: exactly one current version per memory, enforced by a partial unique index `WHERE "is_current"`. Version chain integrity is the unique `(memory_id, version)`.
@@ -167,6 +170,18 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
   preserves original acceptance and dated post-review revalidation without threshold relaxation;
   the final full-suite repeat after query fixes passed with 429 tests, 4 gated benchmark skips and zero failures.
 
+### Product-name registry - implemented and accepted
+
+- `20261015160000_AddProductGraph` creates the `Product`, `Initiative`, `Repo` vertex labels and the
+  `HAS_INITIATIVE`/`HAS_REPO` edge labels plus HASH `name` indexes (and a properties GIN on `Product`).
+  `Product` is graph-native; `Initiative` and `Repo` are identity-only (`name`), the LADR-08 exception
+  applied to new entities. No relational table, no group column (HLD-003 LADR-10).
+- `NpgsqlProductGraph` enforces the uniqueness the graph cannot express under transaction advisory lock
+  `(734921, 3)`: one product per name (case-folded collisions refused), one incoming `HAS_REPO` per repo,
+  one edge per pair. `MERGE`/`MATCH` use property predicates for lookups, mirroring LADR-06.
+- Snapshot/restore and the archive format (v3 → v4) carry the product labels in the same change; an older
+  archive is refused at the manifest version gate, consistent with prior version bumps.
+
 ## Test References
 
 - Ticket coverage: `TicketGraphLifecycleTests`, `TicketGraphMutationTests`, `TicketTraversalTests`;
@@ -189,6 +204,8 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-16 | The corpus snapshot now captures, restores and reconciles `ABOUT` (memory → ticket reference) edges. `SnapshotFormat.Version` bumped 4 → **5** — an older archive is refused at the version gate, because a v4 archive omits `ABOUT` and a restore would silently drop every reference. `NpgsqlSnapshotRepository` reads/writes the edges (after `Memory` and `Ticket` vertices, matched by uuid and provider/key), clears `ABOUT` in `ClearStoresAsync`, and counts it in `IsEmptyAsync` and the reconciliation; `TarSnapshotArchive` writes/reads/reconciles `graph/about_edges.json`; `scripts/verify-graph-restore.sh` counts `ABOUT` before and after. | HLD-003 LADR-09; HLD-006 |
+| 2026-10-13 | Replaced offset-bearing timestamps with NodaTime `Instant` across the model and native EF/Npgsql bindings. Every production, design-time and test data source/EF options enables `UseNodaTime`; existing `timestamptz` columns are unchanged. The old `PostgresInstant` offset workaround is removed. L1 write regressions cover creation/version updates and nullable validity ends. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-10-03 | Documented optional knowledge-service commit, evidence, and recovery support implemented in this branch. | optional knowledge service |
 | 2026-10-01 | `TheConfiguredBudget_BoundsTheRestoreTransactionItself` (L1) pins that `Snapshot:RestoreStatementTimeoutSeconds` governs `RestoreAsync`, not only the pre-flight check: with a 1 s budget and `memory` held under `ACCESS EXCLUSIVE`, the restore fails well inside 30 s and leaves the target empty. Test-only; removing both the budgeted data source and the `SET LOCAL statement_timeout` makes it wait past 30 s and fail. | HLD-006 LADR-07, `HOST_AGENTS.md` config table |
 | 2026-10-01 | `NpgsqlSnapshotRepository.ClearStoresAsync` deletes `recall_feedback` in the restore transaction (rolled back with it); `IsEmptyAsync` still does not count the table. Rationale in HLD-006 `AGENTS.md`. L1: `ForcedRestore_ClearsRecallFeedback_ThatCitesTheReplacedCorpus`, `ATargetHoldingOnlyRecallFeedback_IsEmpty_AndTheRestoreClearsIt`. | HLD-006 NFR-02 |

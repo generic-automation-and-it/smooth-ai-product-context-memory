@@ -71,7 +71,7 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
             rows = rows.Where(x => x.version.Status != MemoryVersion.MemoryVersionStatus.Proposed);
         }
 
-        if (PostgresInstant.ToUtc(criteria.AsOf) is { } asOf)
+        if (criteria.AsOf is { } asOf)
         {
             rows = rows.Where(x => x.version.ValidFrom <= asOf
                 && (x.version.ValidUntil == null || x.version.ValidUntil > asOf));
@@ -93,7 +93,20 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
             rows = rows.Where(x => x.grp.Uuid == groupUuid);
         }
 
-        if (criteria.GroupId is { } groupId)
+        if (criteria.ReferencedUuids is { Count: > 0 } referenced && criteria.GroupId is { } ownerId)
+        {
+            // The reference union: the owner group's memories OR the memories carrying an ABOUT
+            // reference to the ticket. The reference branch applies its own (non-group-context) scope
+            // plan, so a programme-scoped reference is hidden unless that scope was requested (D2).
+            List<string> refExcluded = [.. criteria.ReferencedExcludedScopeDimensions];
+            string? refRequired = criteria.ReferencedRequiredScopeDimension;
+            rows = rows.Where(x =>
+                x.memory.GroupId == ownerId
+                || (referenced.Contains(x.memory.Uuid)
+                    && (refRequired == null || x.grp.ScopeDimension == refRequired)
+                    && !refExcluded.Contains(x.grp.ScopeDimension)));
+        }
+        else if (criteria.GroupId is { } groupId)
         {
             rows = rows.Where(x => x.memory.GroupId == groupId);
         }
@@ -113,6 +126,21 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
             rows = rows.Where(x => db.Initiatives.Any(i => i.Id == x.grp.InitiativeId && i.Name == initiative));
         }
 
+        // Product affinity is one OR predicate, not two ANDed ones: a group belongs to the product
+        // when its initiative is linked to it OR its repo is linked to it (LADR-10, Part F). Both
+        // projections are resolved by the handler and applied before the row ceiling in SQL.
+        IReadOnlyList<string>? initiativeNames = criteria.InitiativeNames;
+        IReadOnlyList<string>? repoNames = criteria.RepoNames;
+        bool matchInitiatives = initiativeNames is { Count: > 0 };
+        bool matchRepos = repoNames is { Count: > 0 };
+        if (matchInitiatives || matchRepos)
+        {
+            rows = rows.Where(x =>
+                (matchInitiatives
+                    && db.Initiatives.Any(i => i.Id == x.grp.InitiativeId && initiativeNames!.Contains(i.Name)))
+                || (matchRepos && repoNames!.Contains(x.grp.Repo)));
+        }
+
         if (criteria.FreeText is { } text)
         {
             // plainto_tsquery stays inside the expression tree. Hoisting it into a local would call it
@@ -124,12 +152,32 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
                     .Matches(EF.Functions.PlainToTsQuery(TextSearchConfig, text)));
         }
 
-        return await rows
+        // The group's repo rides along with the row, and the initiative name is a correlated subquery
+        // (one indexed lookup per row, bounded by the limit) because a left join would change which
+        // groups match. Tickets are deliberately NOT projected here: they live in two stores (the
+        // group's membership array and the graph's ABOUT edges), and reading the array per row would
+        // ship every stored ticket document on every row. `TicketIdentityLookup` assembles them once per
+        // page instead.
+        var projected = await rows
             .OrderByDescending(x => x.version.ValidFrom)
             .ThenBy(x => x.memory.Uuid)
             .ThenBy(x => x.version.Version)
             .Take(criteria.Limit)
-            .Select(x => new CheapMemory(
+            .Select(x => new
+            {
+                x.version,
+                x.memory,
+                x.grp,
+                InitiativeName = db.Initiatives
+                    .Where(i => i.Id == x.grp.InitiativeId)
+                    .Select(i => i.Name)
+                    .FirstOrDefault(),
+            })
+            .ToListAsync(cancellationToken);
+
+        return
+        [
+            .. projected.Select(x => new CheapMemory(
                 x.memory.Uuid,
                 x.grp.Uuid,
                 x.memory.Name,
@@ -149,8 +197,38 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
                 x.version.IsCurrent,
                 x.version.Sources,
                 x.version.CreatedOn,
-                x.version.BlobAddress != null))
-            .ToListAsync(cancellationToken);
+                x.version.BlobAddress != null)
+            {
+                Repository = x.grp.Repo,
+                InitiativeName = x.InitiativeName,
+            })
+        ];
+    }
+
+    public async Task<MemorySearchInspection> InspectAsync(
+        MemorySearchCriteria criteria,
+        CancellationToken cancellationToken)
+    {
+        // The tsquery the FTS predicate translates to, decomposed to its lexemes. Computed over a
+        // parameter — never in the statement text — with the same provider operator the predicate uses,
+        // so the reported lexemes and the matched rows cannot disagree.
+        string? tsQuery = null;
+        if (criteria.FreeText is { } text)
+        {
+            tsQuery = await db.Database
+                .SqlQueryRaw<string>(
+                    "SELECT plainto_tsquery('" + TextSearchConfig + "', {0})::text AS \"Value\"",
+                    text)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        // Ground "what the read path would return" by running that retrieval itself. Materialising the
+        // bounded page then keeping only its size is unusual for a hot path but free of drift — the page
+        // is exactly what the read path returns, so no second query shape can disagree with it.
+        // Probe one extra row to disambiguate the ceiling: a page whose true total is exactly the
+        // limit is complete, not truncated, but `matched == limit` cannot tell the two apart on its own.
+        int probe = (await SearchAsync(criteria with { Limit = criteria.Limit + 1 }, cancellationToken)).Count;
+        return new MemorySearchInspection(tsQuery, Math.Min(probe, criteria.Limit), probe > criteria.Limit);
     }
 
     /// <summary>

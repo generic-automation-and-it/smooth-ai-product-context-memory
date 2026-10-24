@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Features.Export;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -5,9 +6,9 @@ namespace SmoothAiProductContextMemory.Application.UnitTest.Features.Export;
 
 public class ExportRendererTests
 {
-    private static readonly DateTimeOffset ValidFrom = new(2024, 1, 15, 10, 30, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset ValidUntil = new(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset CreatedOn = new(2024, 2, 1, 8, 0, 0, TimeSpan.Zero);
+    private static readonly Instant ValidFrom = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 1, 15, 10, 30, 0, TimeSpan.Zero));
+    private static readonly Instant ValidUntil = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero));
+    private static readonly Instant CreatedOn = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 2, 1, 8, 0, 0, TimeSpan.Zero));
     private static readonly Guid MemoryUuid = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid LineageId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid GroupUuid = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");

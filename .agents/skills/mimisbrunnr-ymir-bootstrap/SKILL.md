@@ -16,15 +16,16 @@ an unrelated coding question is not consent to bootstrap or write memory.
 
 Before any store comparison, dry-run, capture, or recall test:
 
-1. Load `../mimisbrunnr-odin-context-memory/SKILL.md` and its `agents/memory-read.md` and
-   `agents/memory-write.md` worker contracts.
-2. Confirm through a runtime probe or known effective configuration that the runtime provides the
-   `memory-read` and `memory-write` workers described by those contracts, and that the read path holds no
-   write capability: the read worker runs only `context_memory_read_client.py`, which exposes no write
-   subcommand and refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` present. A worker name or
-   registration file alone is not proof, and prompt instructions or ordinary shared subagents do not
-   provide secret isolation.
-3. Fail closed if the dependency or either protected worker is unavailable.
+1. Load `../mimisbrunnr-odin-context-memory/SKILL.md` and its read and write procedures,
+   `references/read-path.md` and `references/write-path.md`. This session follows them itself; there
+   are no read or write subagents.
+2. Confirm the read path holds no write capability by running it:
+   `python3 -B ../_mimisbrunnr-shared/scripts/context_memory_read_client.py probe`, from a
+   shell with no write-token spelling in its environment. The read client exposes no write subcommand
+   and refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` (or the Host's `ApiAccess__WriteToken`) present,
+   so a successful probe is the proof. Prompt instructions alone do not provide secret isolation.
+3. Fail closed if the dependency is missing, the probe refuses because a write token is in the
+   environment, or the store is unreachable.
 
 In the fail-closed path, perform only offline repository discovery and produce the source-backed preview.
 Do not call HTTP clients, helper scripts, or another workaround to reach the store. Do not
@@ -39,7 +40,17 @@ At the start, establish:
 - the chosen repository root and verified repository identity (default the Heimdallr
   reporter's `owner/repo` from the same skills root when the caller names none —
   `.agents/skills`, `.claude/skills` or `.codex/skills`, never a hardcoded prefix —
-  plus branch-seen tickets for a next-feature scope; tags stay agent-derived keywords);
+  with branch-seen tickets **proposed**, not bound, for a next-feature scope; tags stay agent-derived
+  keywords). Run the reporter as `find_session_metadata.py --json --repo-root <chosen root>`, never
+  from whatever working directory the session happens to be in, and accept its `repository` and
+  tickets only when its `rootMatches` is `true` (the reporter compares resolved paths itself; its `root` is a
+  display form and may be withheld); otherwise treat the identity as
+  unproven and bind nothing from it. A session's working directory is often a different checkout from
+  the one being bootstrapped, and a scan there reports that checkout's repository and tickets. A
+  matching root proves **where** a ticket was found, not that it belongs to the named feature: a branch
+  carries whatever ticket the last piece of work on it used. So ask the user to confirm each proposed
+  ticket belongs to the named next feature before it enters the capture binding, and bind none they do
+  not confirm;
 - whether the task is baseline-only or includes deeper inspection for one named next feature;
 - any user-approved external evidence sources.
 
@@ -47,7 +58,9 @@ Anchor repository scope to verified local identity such as the repository root, 
 revision. Never record a remote URL containing credentials or tokens, and reject a user-supplied evidence
 source whose URL embeds credentials before echoing, citing, or opening it. If inspected evidence contains a
 secret, cite only its location and show the value as `<REDACTED>` in the preview; never carry it into a
-candidate or a runtime token into any output. Stay inside the selected repository
+candidate or a runtime token into any output. If it contains a personal identifier (a name, email, account
+name or identity number), generalise it to a role or type ("the maintainer", "an email address") before
+building candidates — never carry the value into a candidate, the preview or a handoff. Stay inside the selected repository
 and explicitly supplied external sources. Do not discover or inspect personal vaults, sibling repositories,
 other workspaces, issue trackers, or services merely because they may contain useful context.
 
@@ -123,9 +136,10 @@ bounded batch and disclose what was deferred; never silently chunk the remainder
 Ask only questions whose answers would materially change claim meaning, scope, lifecycle, group placement,
 or authorization. A disputed candidate can be held while uncontested candidates continue.
 
-For each selected noun (the subject of a change-impact note), also ask the owner what points **into** the
-area from outside — configs, CI, scripts, other repositories — and record each inbound referrer on the claim
-it lands on. Nothing in the tree reveals these; they come from the owner. First-order only.
+For each selected noun (the subject of a change-impact note), first look in the bounded repository evidence
+for what points **into** the area — configs, CI, scripts — and cite each visible referrer on the claim it
+lands on. Then ask the owner only about referrers the checkout cannot show (other repositories, external
+jobs). First-order only.
 
 ### 2. Present A Cited Preview
 
@@ -145,9 +159,9 @@ into, and the obvious-but-wrong look-alike it does **not** touch. First-order on
 
 ### 3. Compare In A Supported Runtime
 
-After the human has reviewed the offline preview, use the protected workers for bounded comparison when
-available and requested. A preview-only request makes no store calls even in a supported runtime. The
-protected writer owns preflight, redaction, within-group deduplication (identity is `(group, uuid)`, so a
+After the human has reviewed the offline preview, follow the odin read path for bounded comparison when
+the runtime gate passed and comparison is requested. A preview-only request makes no store calls even in a
+supported runtime. The odin write path owns preflight, redaction, within-group deduplication (identity is `(group, uuid)`, so a
 same-subject memory in another group is a separate memory to link, not a version), link derivation,
 atomicity, lifecycle handling, and receipt composition. Do not reproduce, bypass, or weaken that pipeline.
 
@@ -163,8 +177,11 @@ itself does not identify an existing group: ticketless resolution creates a synt
 `resolve-group` has no dry-run. Reuse a known, applicable group or ticket when available. If identity is
 absent, leave it for the writer at the authorized checkpoint. A no-op batch must not create a group.
 
-The full memory-set `--dryrun` requires an already-persisted group. Offer it only when an applicable group
-already exists, or after the user separately authorizes group creation. Never create a group solely to
+The full memory-set `--dryrun` requires an already-persisted group **whose UUID is known**. Offer it only
+when that UUID was found read-only — a ticket `query` returns it only when the group already holds
+memories — or after the user separately authorizes group creation. An existing group with no memories
+has no read-only route to its UUID, so for it, as for a group that does not exist yet, the writer can
+preview only the offline plan and reports the set stage as not tested. Never create a group solely to
 preview a batch. `--dryrun` and `--approve` are mutually exclusive. A dry-run after authorized group
 creation means the memory set is dry but the preceding group mutation is real; disclose that the group can
 remain if capture pauses or fails. Present any dry-run result as a reviewable preview, including creates,
@@ -181,15 +198,16 @@ canonical approval, gated `rule`, `nfr`, and `decision` records are written as `
 does not require a second questionnaire. Ask only when the user requests or ambiguously implies approved
 canon. Defaulting capture permission to canonical approval is forbidden.
 
-Delegate the exact reviewed candidates and identities to `memory-write`; it is the sole authority on the
-write path. Preserve its fixed pipeline and current read/write contracts. Do not directly call clients,
-scripts, or HTTP as a substitute. Report the worker's receipt, partial failure, conflict, and skip
+Run the exact reviewed candidates and identities through the odin write path
+(`references/write-path.md`); it is the sole authority on the write path. Preserve its fixed pipeline and
+current read/write procedures. Do not call other clients, scripts, or HTTP as a substitute. Report the
+write path's receipt, partial failure, conflict, and skip
 counts accurately; never claim intended operations succeeded.
 
 ### 5. Verify Through Real Recall
 
-After a successful capture, delegate one or more realistic questions to `memory-read` that represent how a
-future task would need the baseline or next-feature context. Verify that the returned cited conclusions
+After a successful capture, ask one or more realistic questions along the odin read path that represent
+how a future task would need the baseline or next-feature context. Verify that the returned cited conclusions
 preserve scope, lifecycle, exceptions, and uncertainty. Treat recall gaps as gaps: do not widen scope,
 reseed duplicates, or silently add new claims. Any remediation requires a new preview and review cycle.
 
@@ -211,4 +229,4 @@ State:
 - any unavailable stage and the reason;
 - whether anything was written, including a group created before a paused or failed memory set.
 
-Do not claim success when the protected-worker gate prevented comparison, capture, or recall verification.
+Do not claim success when the runtime gate prevented comparison, capture, or recall verification.

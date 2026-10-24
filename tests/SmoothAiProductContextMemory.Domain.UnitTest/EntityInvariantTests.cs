@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Domain.UnitTest;
@@ -20,9 +21,9 @@ public class EntityInvariantTests
     {
         var version = new MemoryVersion
         {
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidUntil = DateTimeOffset.UtcNow.AddDays(1),
-            CreatedOn = DateTimeOffset.UtcNow,
+            ValidFrom = SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1)),
+            ValidUntil = SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(1)),
+            CreatedOn = SystemClock.Instance.GetCurrentInstant(),
         };
 
         version.ValidUntil.ShouldNotBeNull();

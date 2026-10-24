@@ -2,6 +2,6 @@
   <PropertyGroup><IsTestProject>true</IsTestProject><IsPackable>false</IsPackable></PropertyGroup>
   <ItemGroup><ProjectReference Include="../../src/SmoothAiProductContextMemory.KnowledgeHost/SmoothAiProductContextMemory.KnowledgeHost.csproj" /></ItemGroup>
   <ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit.v3" /><PackageReference Include="xunit.runner.visualstudio" /><PackageReference Include="Shouldly" /><PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" /></ItemGroup>
-  <ItemGroup><Content Include="../../.agents/skills/mimisbrunnr-odin-context-memory/scripts/redact.py" Link="redact.py" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup><Content Include="../../.agents/skills/_mimisbrunnr-shared/scripts/redact.py" Link="redact.py" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
   <ItemGroup><Content Include="../../scripts/knowledge-evaluation/atomicity-fixtures.json" Link="atomicity-fixtures.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

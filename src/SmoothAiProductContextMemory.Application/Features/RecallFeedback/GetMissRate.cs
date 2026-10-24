@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation;
 using Mediator;
 using SmoothAiProductContextMemory.Application.Abstractions;
@@ -11,8 +12,8 @@ namespace SmoothAiProductContextMemory.Application.Features.RecallFeedback;
 public static class GetMissRate
 {
     public sealed record Request(
-        DateTimeOffset From,
-        DateTimeOffset To,
+        Instant From,
+        Instant To,
         string? RecallPurpose = null) : IRequest<Response>;
 
     public sealed record Response(int Retrievals, int Misses, double MissRate,

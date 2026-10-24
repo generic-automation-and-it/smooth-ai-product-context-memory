@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Shouldly;
@@ -16,7 +17,76 @@ namespace SmoothAiProductContextMemory.Application.ComponentTest.Features;
 public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTestBase(aspire)
 {
     private NpgsqlCorpusCommitStore Store => new(Db);
-    private SetMemories.Handler Writer => new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>(), Store);
+    private SetMemories.Handler Writer => new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>(), Store);
+
+    [Fact]
+    public async Task Product_graph_mutation_invalidates_a_service_plan()
+    {
+        MemoryGroup group = await GroupAsync();
+        CorpusState before = await Store.GetStateAsync(Ct);
+        await ProductGraph.UpsertAsync("compatibility-product", "Synthetic product", "active", Ct);
+        (await Store.GetStateAsync(Ct)).Revision.ShouldBeGreaterThan(before.Revision);
+        await Should.ThrowAsync<ConflictException>(async () => await Writer.Handle(
+            Write(group.Uuid, "subject", "fact") with
+            {
+                OperationKey = "product-stale", ExpectedCorpusEpoch = before.Epoch,
+                ExpectedCorpusRevision = before.Revision,
+            }, Ct));
+        (await Store.FindAsync("product-stale", Ct)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Product_updates_and_links_advance_revision_but_duplicate_links_do_not()
+    {
+        await ProductGraph.UpsertAsync("product", "first", "active", Ct);
+        long revision = (await Store.GetStateAsync(Ct)).Revision;
+        await ProductGraph.UpsertAsync("product", "updated", null, Ct);
+        (await Store.GetStateAsync(Ct)).Revision.ShouldBeGreaterThan(revision);
+        revision = (await Store.GetStateAsync(Ct)).Revision;
+        await ProductGraph.LinkInitiativeAsync("product", "initiative", "reason", "test", Ct);
+        (await Store.GetStateAsync(Ct)).Revision.ShouldBeGreaterThan(revision);
+        revision = (await Store.GetStateAsync(Ct)).Revision;
+        await ProductGraph.LinkInitiativeAsync("product", "initiative", "reason", "test", Ct);
+        (await Store.GetStateAsync(Ct)).Revision.ShouldBe(revision);
+        await ProductGraph.UnlinkInitiativeAsync("product", "initiative", Ct);
+        (await Store.GetStateAsync(Ct)).Revision.ShouldBeGreaterThan(revision);
+        revision = (await Store.GetStateAsync(Ct)).Revision;
+        await ProductGraph.LinkRepoAsync("product", "synthetic/repo", "reason", "test", Ct);
+        (await Store.GetStateAsync(Ct)).Revision.ShouldBeGreaterThan(revision);
+    }
+
+    [Fact]
+    public async Task Ticket_reference_invalidates_a_service_plan()
+    {
+        MemoryGroup owner = TestEntities.NewGroup(tickets: [TicketDocument.Create("local", "reference-target", "")]);
+        Db.MemoryGroups.Add(owner);
+        await Db.SaveChangesAsync(Ct);
+        MemoryGroup group = await GroupAsync();
+        Guid uuid = (await Writer.Handle(Write(group.Uuid, "subject", "fact"), Ct)).Items[0].Uuid!.Value;
+        CorpusState before = await Store.GetStateAsync(Ct);
+        await Graph.CreateAboutAsync(uuid, "local", "reference-target", "reason", Ct);
+        (await Store.GetStateAsync(Ct)).Revision.ShouldBeGreaterThan(before.Revision);
+        await Should.ThrowAsync<ConflictException>(async () => await Writer.Handle(
+            Write(group.Uuid, "other", "fact") with
+            {
+                OperationKey = "reference-stale", ExpectedCorpusEpoch = before.Epoch,
+                ExpectedCorpusRevision = before.Revision,
+            }, Ct));
+    }
+
+    [Fact]
+    public async Task Identical_claim_cannot_bypass_a_stale_expected_version()
+    {
+        MemoryGroup group = await GroupAsync();
+        Guid uuid = (await Writer.Handle(Write(group.Uuid, "subject", "first"), Ct)).Items[0].Uuid!.Value;
+        await Writer.Handle(Write(group.Uuid, "subject", "second", uuid), Ct);
+        SetMemories.Request same = Write(group.Uuid, "subject", "second", uuid);
+        await Should.ThrowAsync<ConflictException>(async () => await Writer.Handle(same with
+        {
+            Items = [same.Items[0] with { ExpectedVersion = 1 }],
+        }, Ct));
+        (await Db.MemoryVersions.CountAsync(Ct)).ShouldBe(2);
+    }
 
     [Fact]
     public async Task Retry_of_create_and_version_returns_original_result_without_another_version()
@@ -108,9 +178,9 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
         var evidence = new EvidenceDocument { Category = "approved_intent", Authority = "practitioner", AuthorityReference = "message:1", Applicability = "proposal" };
         SetMemories.Response result = await Writer.Handle(request with
         {
-            Items = [request.Items[0] with { Sources = [new SourceInput("message", "message:1", DateTimeOffset.UtcNow, evidence)] }],
+            Items = [request.Items[0] with { Sources = [new SourceInput("message", "message:1", SystemClock.Instance.GetCurrentInstant(), evidence)] }],
         }, Ct);
-        GetMemoryVersions.Response versions = await new GetMemoryVersions.Handler(AppDb, Loggers.CreateLogger<GetMemoryVersions.Handler>())
+        GetMemoryVersions.Response versions = await new GetMemoryVersions.Handler(AppDb, Graph, Loggers.CreateLogger<GetMemoryVersions.Handler>())
             .Handle(new GetMemoryVersions.Request(result.Items[0].Uuid!.Value), Ct);
         versions.Items.ShouldHaveSingleItem().Sources.ShouldHaveSingleItem().Evidence.ShouldNotBeNull().Category.ShouldBe("approved_intent");
         SourceDocument.Create("legacy", "reference").Evidence.ShouldBeNull();
@@ -244,10 +314,10 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
 
     private SmoothAiProductContextMemoryDbContext NewContext() => new(
         new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(TestDataSource).Options);
+            .UseNpgsql(TestDataSource, options => options.UseNodaTime()).Options);
 
     private SetMemories.Handler WriterFor(SmoothAiProductContextMemoryDbContext context) => new(
-        context, new NpgsqlMemoryGraph(context), Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>(), new NpgsqlCorpusCommitStore(context));
+        context, new NpgsqlMemoryGraph(context), Blob, ErrorMapper, new NpgsqlProductGraph(context), Loggers.CreateLogger<SetMemories.Handler>(), new NpgsqlCorpusCommitStore(context));
 
     private async Task<MemoryGroup> GroupAsync()
     {
@@ -259,5 +329,5 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
 
     private static SetMemories.Request Write(Guid group, string subject, string statement, Guid? uuid = null) => new(group,
         [new SetMemories.MemoryWrite(uuid, subject, subject, statement, statement, "rule", null, null, "proposed", 80,
-            null, null, DateTimeOffset.Parse("2026-10-03T00:00:00Z"), null, null, null)], null, null);
+            null, null, Instant.FromUtc(2026, 10, 3, 0, 0), null, null, null)], null, null);
 }

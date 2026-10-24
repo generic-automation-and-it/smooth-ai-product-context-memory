@@ -1,3 +1,4 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
@@ -12,7 +13,7 @@ public sealed class ObservabilityTests(ObservabilityWebAppFixture fixture) : ICl
     private const string HttpClientSourceName = "System.Net.Http";
     private const string NpgsqlSourceName = "Npgsql";
 
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
 
     private readonly HttpClient _http = fixture.HttpClient;
 

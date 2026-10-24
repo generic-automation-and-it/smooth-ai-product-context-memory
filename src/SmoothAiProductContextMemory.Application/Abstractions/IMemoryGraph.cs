@@ -32,6 +32,50 @@ public interface IMemoryGraph
     Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(
         IReadOnlyCollection<Guid> uuids,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// True when the memory already carries the <c>ABOUT</c> edge to the ticket.
+    /// </summary>
+    Task<bool> AboutExistsAsync(
+        Guid memoryUuid,
+        string provider,
+        string key,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Declares <c>(Memory)-[:ABOUT]->(Ticket)</c> when absent. The Memory vertex is created on demand;
+    /// the Ticket vertex must already exist (the group membership trigger owns it). Returns
+    /// <see langword="false"/> on duplicate.
+    /// </summary>
+    Task<bool> CreateAboutAsync(
+        Guid memoryUuid,
+        string provider,
+        string key,
+        string reason,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Lists the memory uuids carrying an <c>ABOUT</c> edge to the ticket <paramref name="provider"/>:<paramref name="key"/>.
+    /// Bounded and index-served (LADR-06) — the recall reference union resolves the set of memories that
+    /// reference a ticket without scanning the whole edge table.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ListAboutAsync(
+        string provider,
+        string key,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The same edges read from the other end: the tickets the given memories reference, in one
+    /// bounded read. Anchored on the selection, so the cost is bounded by the number of memories asked
+    /// for (a page of rows) rather than by the whole edge set — a list view that names each row's
+    /// binding must not issue a query per row.
+    /// </summary>
+    Task<IReadOnlyList<MemoryTicketReference>> FindAboutAsync(
+        IReadOnlyCollection<Guid> memoryUuids,
+        CancellationToken cancellationToken);
 }
 
 public sealed record MemoryRelationship(Guid SourceUuid, Guid TargetUuid, string Relation, string Reason);
+
+/// <summary>One <c>(Memory)-[:ABOUT]->(Ticket)</c> edge: identity plus the declaration that made it.</summary>
+public sealed record MemoryTicketReference(Guid MemoryUuid, string Provider, string Key, string Reason);

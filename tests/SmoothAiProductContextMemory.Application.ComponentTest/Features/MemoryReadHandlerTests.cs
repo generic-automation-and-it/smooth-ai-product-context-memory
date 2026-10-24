@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -70,8 +71,8 @@ public sealed class GetMemoryBlobHandlerTests(AspireFixture aspire) : HandlerTes
             Confidence = 50,
             Status = MemoryVersion.MemoryVersionStatus.Proposed,
             BlobAddress = address,
-            ValidFrom = DateTimeOffset.UtcNow,
-            CreatedOn = DateTimeOffset.UtcNow,
+            ValidFrom = SystemClock.Instance.GetCurrentInstant(),
+            CreatedOn = SystemClock.Instance.GetCurrentInstant(),
         });
         await Db.SaveChangesAsync(Ct);
         Db.ChangeTracker.Clear();
@@ -81,6 +82,91 @@ public sealed class GetMemoryBlobHandlerTests(AspireFixture aspire) : HandlerTes
 
     private GetMemoryBlob.Handler NewHandler() =>
         new(AppDb, Blob, Loggers.CreateLogger<GetMemoryBlob.Handler>());
+}
+
+public sealed class GetMemoryHandlerTests(AspireFixture aspire) : HandlerTestBase(aspire)
+{
+    [Fact]
+    public async Task Returns_the_current_version_by_identity()
+    {
+        MemoryGroup group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Memory memory = TestEntities.NewMemory(group.Id, "m", "a memory");
+        Db.Memories.Add(memory);
+        Db.MemoryVersions.AddRange(
+            Version(memory, 1, current: false, "superseded"),
+            Version(memory, 2, current: true, "current claim"));
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        int savesBeforeRead = SaveChanges.Count;
+        GetMemory.Response response = await NewHandler().Handle(new GetMemory.Request(memory.Uuid), Ct);
+
+        response.Item.Uuid.ShouldBe(memory.Uuid);
+        response.Item.Version.ShouldBe(2);
+        response.Item.Statement.ShouldBe("current claim");
+        response.Item.IsCurrent.ShouldBeTrue();
+        SaveChanges.Count.ShouldBe(savesBeforeRead);
+    }
+
+    [Fact]
+    public async Task Unknown_memory_throws_not_found()
+    {
+        await Should.ThrowAsync<NotFoundException>(async () =>
+            await NewHandler().Handle(new GetMemory.Request(Guid.NewGuid()), Ct));
+    }
+
+    [Fact]
+    public async Task Program_scoped_memory_is_blocked_without_the_scope()
+    {
+        MemoryGroup group = TestEntities.NewGroup(scopeDimension: "program");
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Memory memory = TestEntities.NewMemory(group.Id, "m", "a memory");
+        Db.Memories.Add(memory);
+        Db.MemoryVersions.Add(Version(memory, 1, current: true, "first"));
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        await Should.ThrowAsync<ForbiddenException>(async () =>
+            await NewHandler().Handle(new GetMemory.Request(memory.Uuid), Ct));
+    }
+
+    [Fact]
+    public async Task Program_scoped_memory_is_read_with_the_scope()
+    {
+        MemoryGroup group = TestEntities.NewGroup(scopeDimension: "program");
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Memory memory = TestEntities.NewMemory(group.Id, "m", "a memory");
+        Db.Memories.Add(memory);
+        Db.MemoryVersions.Add(Version(memory, 1, current: true, "first"));
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        GetMemory.Response response = await NewHandler().Handle(
+            new GetMemory.Request(memory.Uuid, "program"), Ct);
+
+        response.Item.ScopeDimension.ShouldBe("program");
+    }
+
+    private static MemoryVersion Version(Memory memory, int version, bool current, string statement) => new()
+    {
+        Memory = memory,
+        Version = version,
+        IsCurrent = current,
+        Statement = statement,
+        ContentSummary = "summary",
+        Kind = "decision",
+        Confidence = 50,
+        Status = MemoryVersion.MemoryVersionStatus.Approved,
+        ValidFrom = SystemClock.Instance.GetCurrentInstant(),
+        CreatedOn = SystemClock.Instance.GetCurrentInstant(),
+    };
+
+    private GetMemory.Handler NewHandler() =>
+        new(AppDb, Graph, Loggers.CreateLogger<GetMemory.Handler>());
 }
 
 public sealed class GetMemoryVersionsHandlerTests(AspireFixture aspire) : HandlerTestBase(aspire)
@@ -139,10 +225,10 @@ public sealed class GetMemoryVersionsHandlerTests(AspireFixture aspire) : Handle
         Kind = "decision",
         Confidence = 50,
         Status = MemoryVersion.MemoryVersionStatus.Proposed,
-        ValidFrom = DateTimeOffset.UtcNow,
-        CreatedOn = DateTimeOffset.UtcNow,
+        ValidFrom = SystemClock.Instance.GetCurrentInstant(),
+        CreatedOn = SystemClock.Instance.GetCurrentInstant(),
     };
 
     private GetMemoryVersions.Handler NewHandler() =>
-        new(AppDb, Loggers.CreateLogger<GetMemoryVersions.Handler>());
+        new(AppDb, Graph, Loggers.CreateLogger<GetMemoryVersions.Handler>());
 }

@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Shouldly;
@@ -39,6 +40,51 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         versions.Single(v => v.Version == 1).Statement.ShouldBe("Claim 1");
         versions.Single(v => v.IsCurrent).SummaryStamp.ShouldNotBeNull();
         versions.Single(v => v.IsCurrent).SummaryStamp!.Model.ShouldBe("test-model");
+    }
+
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(-5, false)]
+    public async Task Writes_preserve_absolute_instants_with_non_utc_offsets(int offsetHours, bool hasEnd)
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        var start = Instant.FromDateTimeOffset(new DateTimeOffset(2026, 10, 13, 16, 0, 0, TimeSpan.FromHours(offsetHours)));
+        Instant? end = hasEnd ? start.Plus(Duration.FromDays(1)) : null;
+        SetMemories.Request request = Write(group.Uuid, "Timestamp subject", "Initial claim");
+        request = request with
+        {
+            Items = [request.Items[0] with { ValidFrom = start, ValidUntil = end }],
+        };
+
+        SetMemories.Handler handler = NewHandler();
+        (await handler.Handle(request with { DryRun = true }, Ct)).Created.ShouldBe(1);
+        SetMemories.Response created = await handler.Handle(request, Ct);
+        created.Created.ShouldBe(1);
+        Guid uuid = created.Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response updated = await handler.Handle(request with
+        {
+            Items = [request.Items[0] with
+            {
+                Uuid = uuid,
+                Statement = "Updated claim",
+                ValidFrom = start.Plus(Duration.FromHours(1)),
+                ValidUntil = end?.Plus(Duration.FromHours(1)),
+            }],
+        }, Ct);
+        updated.Versioned.ShouldBe(1);
+
+        List<MemoryVersion> versions = await Db.MemoryVersions.AsNoTracking()
+            .OrderBy(v => v.Version).ToListAsync(Ct);
+        versions.Count.ShouldBe(2);
+        versions[0].ValidFrom.ShouldBe(start);
+        versions[0].ValidUntil.ShouldBe(end);
+        versions[1].ValidFrom.ShouldBe(start.Plus(Duration.FromHours(1)));
+        versions[1].ValidUntil.ShouldBe(end?.Plus(Duration.FromHours(1)));
+        versions.Single(v => v.IsCurrent).Version.ShouldBe(2);
     }
 
     [Fact]
@@ -220,7 +266,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
 
         SetMemories.MemoryWrite item = Write(group.Uuid, "Sourced", "Claim").Items[0] with
         {
-            Sources = [new("jira", "ACM-1", DateTimeOffset.UtcNow)]
+            Sources = [new("jira", "ACM-1", SystemClock.Instance.GetCurrentInstant())]
         };
         await NewHandler().Handle(Write(group.Uuid, "Sourced", "Claim") with { Items = [item] }, Ct);
 
@@ -289,7 +335,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
             failingGraph,
             Blob,
             ErrorMapper,
-            Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
+            ProductGraph, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
         SetMemories.Request request = Write(group.Uuid, "Rollback A", "A") with
         {
             Items =
@@ -421,10 +467,24 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
 
         public Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(IReadOnlyCollection<Guid> uuids, CancellationToken cancellationToken) =>
             inner.ListEdgesAsync(uuids, cancellationToken);
+
+        public Task<bool> AboutExistsAsync(Guid memoryUuid, string provider, string key, CancellationToken cancellationToken) =>
+            inner.AboutExistsAsync(memoryUuid, provider, key, cancellationToken);
+
+        public Task<bool> CreateAboutAsync(Guid memoryUuid, string provider, string key, string reason, CancellationToken cancellationToken) =>
+            inner.CreateAboutAsync(memoryUuid, provider, key, reason, cancellationToken);
+
+        public Task<IReadOnlyList<Guid>> ListAboutAsync(string provider, string key, CancellationToken cancellationToken) =>
+            inner.ListAboutAsync(provider, key, cancellationToken);
+
+        public Task<IReadOnlyList<MemoryTicketReference>> FindAboutAsync(
+            IReadOnlyCollection<Guid> memoryUuids,
+            CancellationToken cancellationToken) =>
+            inner.FindAboutAsync(memoryUuids, cancellationToken);
     }
 
     private SetMemories.Handler NewHandler() =>
-        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
+        new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
 
     /// <summary>
     /// A version target must resolve inside the group the write names. The lookup was by uuid alone
@@ -505,6 +565,154 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         memories.Single(m => m.Uuid == secondUuid).Statements.ShouldBe(["Second claim"]);
     }
 
+    [Fact]
+    public async Task Re_sending_identical_claim_is_unchanged_not_a_new_version()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim 1"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response second = await handler.Handle(Write(group.Uuid, "Subject", "Claim 1", uuid), Ct);
+
+        second.Created.ShouldBe(0);
+        second.Versioned.ShouldBe(0);
+        second.Unchanged.ShouldBe(1);
+        second.Items[0].Versioned.ShouldBeFalse();
+        second.Items[0].Unchanged.ShouldBeTrue();
+
+        long memoryId = await Db.Memories.AsNoTracking().Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
+        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.MemoryId == memoryId).ToArrayAsync(Ct);
+        versions.Length.ShouldBe(1);
+        versions.Single().Version.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Version_item_differing_only_in_tags_is_unchanged()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim 1"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response response = await handler.Handle(
+            Write(group.Uuid, "Subject", "Claim 1", uuid) with
+            {
+                Items = [Write(group.Uuid, "Subject", "Claim 1", uuid).Items[0] with { Tags = ["different-tag"] }],
+            },
+            Ct);
+
+        response.Versioned.ShouldBe(0);
+        response.Unchanged.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Ordered_batch_with_unchanged_first_creates_two_versions()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim A"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Request batch = new(
+            group.Uuid,
+            [
+                Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Claim B", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+            ],
+            null,
+            null);
+
+        SetMemories.Response written = await handler.Handle(batch, Ct);
+        written.Versioned.ShouldBe(2);
+        written.Unchanged.ShouldBe(1);
+
+        long memoryId = await Db.Memories.AsNoTracking().Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
+        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.MemoryId == memoryId).OrderBy(v => v.Version).ToArrayAsync(Ct);
+        versions.Select(v => v.Statement).ShouldBe(["Claim A", "Claim B", "Claim A"]);
+        versions.Single(v => v.IsCurrent).Version.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Two_identical_new_claims_in_one_batch_create_one_version()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim X"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Request batch = new(
+            group.Uuid,
+            [
+                Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+            ],
+            null,
+            null);
+
+        SetMemories.Response written = await handler.Handle(batch, Ct);
+        written.Versioned.ShouldBe(1);
+        written.Unchanged.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Dry_run_reports_unchanged_with_null_addresses_and_writes_nothing()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim 1"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response dry = await handler.Handle(
+            Write(group.Uuid, "Subject", "Claim 1", uuid) with { DryRun = true }, Ct);
+
+        dry.Unchanged.ShouldBe(1);
+        dry.Items[0].BlobAddress.ShouldBeNull();
+        dry.Items[0].Uuid.ShouldBe(uuid);
+        (await Db.MemoryVersions.AsNoTracking().CountAsync(Ct)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Item_result_never_reports_versioned_and_unchanged_together()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim A"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response written = await handler.Handle(
+            new(
+                group.Uuid,
+                [
+                    Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+                    Write(group.Uuid, "Subject", "Claim B", uuid).Items[0],
+                    Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+                ],
+                null,
+                null),
+            Ct);
+
+        foreach (SetMemories.ItemResult item in written.Items)
+        {
+            (item.Versioned && item.Unchanged).ShouldBeFalse();
+        }
+    }
+
     private static SetMemories.Request Write(Guid groupUuid, string description, string statement, Guid? uuid = null) =>
         new(
             groupUuid,
@@ -518,15 +726,111 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
                     MemoryVersion.KindValue.Decision,
                     ["architecture"],
                     ["tag"],
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     "blob-body",
                     null,
-                    DateTimeOffset.UtcNow.AddDays(-1),
+                    SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1)),
                     null,
                     "test-model",
                     "prompt-1")
             ],
             null,
             null);
+
+    /// <summary>LADR-11: an approve is a version-bump with Status=approved on a Proposed version. v1 stays proposed, v2 becomes approved.</summary>
+    [Fact]
+    public async Task Approved_transition_creates_v2_with_approved_status()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        SetMemories.Response created = await NewHandler().Handle(
+            Write(group.Uuid, "Approved transition subject", "Initial proposed claim"), Ct);
+        Guid uuid = created.Items[0].Uuid!.Value;
+
+        SetMemories.Request approve = Write(group.Uuid, "Approved transition subject", "Approved claim", uuid) with
+        {
+            Items = [Write(group.Uuid, "Approved transition subject", "Approved claim", uuid).Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+            }],
+        };
+        SetMemories.Response approved = await NewHandler().Handle(approve, Ct);
+        approved.Versioned.ShouldBe(1);
+
+        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.Memory!.GroupId == group.Id)
+            .OrderBy(v => v.Version)
+            .ToArrayAsync(Ct);
+        versions.Length.ShouldBe(2);
+        versions[0].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Proposed);
+        versions[0].IsCurrent.ShouldBeFalse();
+        versions[1].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Approved);
+        versions[1].IsCurrent.ShouldBeTrue();
+    }
+
+    /// <summary>LADR-11: an approved memory can be revised into a new approved version (append-only), and a same-content re-approve is a no-op.</summary>
+    [Fact]
+    public async Task Approved_revision_creates_new_approved_version()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        SetMemories.Response created = await NewHandler().Handle(
+            Write(group.Uuid, "Re-approve subject", "Initial proposed claim"), Ct);
+        Guid uuid = created.Items[0].Uuid!.Value;
+
+        SetMemories.Request firstApprove = Write(group.Uuid, "Re-approve subject", "Approve", uuid) with
+        {
+            Items = [Write(group.Uuid, "Re-approve subject", "Approve", uuid).Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+            }],
+        };
+        await NewHandler().Handle(firstApprove, Ct);
+
+        // A different claim on the already-approved memory is a revision: a new
+        // approved version, not a conflict (the capture path re-captures
+        // approved memories as new versions).
+        SetMemories.Request revision = Write(group.Uuid, "Re-approve subject", "Approve again", uuid) with
+        {
+            Items = [Write(group.Uuid, "Re-approve subject", "Approve again", uuid).Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+            }],
+        };
+        SetMemories.Response revised = await NewHandler().Handle(revision, Ct);
+        revised.Versioned.ShouldBe(1);
+
+        // LADR-11: the revision must be stored as an approved version, not slip
+        // back to proposed. v1 proposed, v2 approved, v3 approved (current).
+        MemoryVersion[] afterRevision = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.Memory!.GroupId == group.Id)
+            .OrderBy(v => v.Version)
+            .ToArrayAsync(Ct);
+        afterRevision.Length.ShouldBe(3);
+        afterRevision[0].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Proposed);
+        afterRevision[0].IsCurrent.ShouldBeFalse();
+        afterRevision[1].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Approved);
+        afterRevision[1].IsCurrent.ShouldBeFalse();
+        afterRevision[2].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Approved);
+        afterRevision[2].IsCurrent.ShouldBeTrue();
+
+        // A same-claim re-approve is a no-op (Unchanged), never a new version.
+        SetMemories.Request noop = Write(group.Uuid, "Re-approve subject", "Approve again", uuid) with
+        {
+            Items = [Write(group.Uuid, "Re-approve subject", "Approve again", uuid).Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+            }],
+        };
+        SetMemories.Response noopResp = await NewHandler().Handle(noop, Ct);
+        noopResp.Versioned.ShouldBe(0);
+        noopResp.Unchanged.ShouldBe(1);
+    }
 }

@@ -7,6 +7,20 @@ namespace SmoothAiProductContextMemory.Knowledge.UnitTest;
 public sealed class WorkflowRegressionTests
 {
     [Fact]
+    public async Task Pre_upgrade_pending_capture_is_held_without_replaying_writes()
+    {
+        using var rig = new Rig();
+        var receipt = await rig.Workflow.AcceptAsync(new CaptureRequest("old", "Upgrade test",
+            [new Message("m1", "user", 0, "A proposed rule.")]), TestContext.Current.CancellationToken);
+        var job = rig.Journal.Get(receipt.Id)!;
+        await rig.Journal.SaveAsync(job with { WorkflowVersion = "knowledge-v1" }, TestContext.Current.CancellationToken);
+        await rig.Workflow.ProcessAsync(receipt.Id, TestContext.Current.CancellationToken);
+        rig.Workflow.Get(receipt.Id)!.ErrorClass.ShouldBe("workflow_version_changed");
+        rig.Core.Commits.ShouldBeEmpty();
+        rig.Journal.Get(receipt.Id)!.Input.ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task Changed_attribution_is_retained_even_when_message_id_and_text_are_unchanged()
     {
         using var rig = new Rig();
