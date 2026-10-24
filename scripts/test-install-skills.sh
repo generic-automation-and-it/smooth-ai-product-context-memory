@@ -518,8 +518,8 @@ check_pruned() {
   fi
   # kvasir's client loads its messages from assets/ at runtime, so a prune that ate the folder would
   # leave every refusal in that skill unable to print (it fails closed, but the skill is still broken).
-  if [ ! -e "$root/mimisbrunnr-kvasir-understanding/assets/store-unreachable.md" ]; then
-    no "[$runner] an installed skill keeps its runtime files" "kvasir/assets store-unreachable.md missing"
+  if [ ! -e "$root/mimisbrunnr-kvasir-understanding/assets/gate-redactor-refusal.md" ]; then
+    no "[$runner] an installed skill keeps its runtime files" "kvasir/assets gate-redactor-refusal.md missing"
     return
   fi
 
