@@ -1801,6 +1801,18 @@ def _product_register_hint(product: str) -> str:
             f"python3 -B {WRITE_CLIENT} upsert-product-name")
 
 
+def _initiative_create_hint(initiative: str) -> str:
+    """The command that creates a missing initiative, from this skill's assets.
+
+    Three printed lines at two call sites, so it lives in `assets/` like the other prose. Its
+    trailing newline is payload — callers append `Nothing was written.` after it, and the loader
+    strips a file's own newline. The write client's resolved path is substituted, so an installed
+    copy points at the client it actually has.
+    """
+    return render_asset("initiative-create-hint.md", initiative=initiative,
+                        write_client=WRITE_CLIENT) + "\n"
+
+
 def _preview_product_link(args: argparse.Namespace, targets: list[tuple[str, str]]) -> None:
     """Report the edges a write would declare, from a read of the register.
 
@@ -2565,16 +2577,14 @@ def cmd_export(args: argparse.Namespace) -> int:
                       f"initiative '{initiative}' is absent — would create: "
                       f"context_memory_client.py upsert-initiative "
                       f"<<<'name': '{initiative}', 'status': 'active'>>>")
-    create_hint = (f"Create it first, then re-run:\n"
-                   f"  echo '{{\"name\": \"{initiative}\", \"status\": \"active\"}}' | "
-                   f"python3 -B {WRITE_CLIENT} upsert-initiative\n")
     # Only a group that must be created needs the initiative: `resolve-group` returns an existing
     # ticket-bound group without looking it up, so an absent initiative refuses a ticketless write (which
     # always creates) here, and a ticket-bound one only if resolution reports it (consumer review
     # 5438563690 #12).
     if args.write and not exists and not binding["tickets"]:
         print(f"REFUSED: initiative '{initiative}' does not exist, and resolve-group answers 404 for "
-              f"it when it creates a group. {create_hint}Nothing was written.", file=sys.stderr)
+              f"it when it creates a group. {_initiative_create_hint(initiative)}Nothing was written.",
+              file=sys.stderr)
         return 1
 
 
@@ -2674,7 +2684,8 @@ def cmd_export(args: argparse.Namespace) -> int:
     group, group_state = resolve_group(binding, args.name, args.body, dryrun=not args.write)
     if args.write:
         if group is None:
-            hint = (f" Initiative '{initiative}' does not exist; a new group needs it. {create_hint}"
+            hint = (f" Initiative '{initiative}' does not exist; a new group needs it. "
+                    f"{_initiative_create_hint(initiative)}"
                     if not exists else " ")
             print(f"REFUSED: resolve-group failed: {group_state}.{hint}Nothing was written.",
                   file=sys.stderr)

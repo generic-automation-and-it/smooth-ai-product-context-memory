@@ -5528,6 +5528,10 @@ class SkillAssetTests(unittest.TestCase):
             "Nothing was written.")),
         ("session-marker-note.md", {"error": "E"}, (
             "NOTE: session marker not written (E).")),
+        ("initiative-create-hint.md", {"initiative": "core", "write_client": "WRITE"}, (
+            "Create it first, then re-run:\n"
+            "  echo '{\"name\": \"core\", \"status\": \"active\"}' | python3 -B WRITE "
+            "upsert-initiative")),
         ("export-preview-dry-run.md", {"total": 4, "group": ", group (dry-run)"}, (
             "DRY RUN — nothing was written, and nothing was created.\n"
             "  would write: memory (4), group (dry-run)\n"
