@@ -67,7 +67,7 @@ public sealed class OpenAiProvider(HttpClient client, string key, string model, 
         {
             string name = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
             var schema = Schema(property.PropertyType);
-            if (type == typeof(Candidate) && property.Name == nameof(Candidate.Category)) schema["enum"] = new JsonArray("suggestion", "document_approval", "approved_intent", "observed_implementation", "unknown");
+            if (type == typeof(Candidate) && property.Name == nameof(Candidate.Category)) schema["enum"] = new JsonArray("reported_fact", "suggestion", "document_approval", "approved_intent", "observed_implementation", "unknown");
             if (nullability.Create(property).ReadState == System.Reflection.NullabilityState.Nullable && Nullable.GetUnderlyingType(property.PropertyType) is null)
                 schema = new JsonObject { ["anyOf"] = new JsonArray(schema, new JsonObject { ["type"] = "null" }) };
             properties.Add(name, schema);

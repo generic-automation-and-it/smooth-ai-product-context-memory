@@ -101,7 +101,7 @@ public static class SetMemories
                 item.RuleForEach(i => i.Sources).ChildRules(source =>
                 {
                     source.RuleFor(s => s.Evidence).Must(e => e is null || (e.V == 1
-                        && e.Category is "suggestion" or "document_approval" or "approved_intent" or "observed_implementation" or "unknown"))
+                        && e.Category is "reported_fact" or "suggestion" or "document_approval" or "approved_intent" or "observed_implementation" or "unknown"))
                         .WithMessage("Evidence must use shape 1 and a supported category.");
                 });
                 item.RuleFor(i => i.Name).NotEmpty().MaximumLength(200);

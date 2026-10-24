@@ -144,7 +144,9 @@ def stable_handoff(task_id, payload, state):
     if not remaining:
         return None
     result = dict(payload)
-    result["messages"] = remaining
+    # Keep explicitly supplied prior context when there is new evidence.
+    # Stable source IDs let the service deduplicate it without losing question/answer meaning.
+    result["messages"] = messages
     result["previousCursor"] = state.get("cursor")
     digest = hashlib.sha256(json.dumps({"taskId": task_id, "payload": result}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     result["idempotencyKey"] = "handoff-" + digest

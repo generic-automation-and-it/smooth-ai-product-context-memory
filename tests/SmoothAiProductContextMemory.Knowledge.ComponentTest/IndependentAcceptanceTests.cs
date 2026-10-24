@@ -9,6 +9,46 @@ namespace SmoothAiProductContextMemory.Knowledge.ComponentTest;
 public sealed class IndependentAcceptanceTests
 {
     [Theory]
+    [InlineData("Our customers reconcile their invoices every Friday.")]
+    [InlineData("I prefer concise status updates.")]
+    [InlineData("A workspace can contain several teams.")]
+    public async Task Ordinary_knowledge_is_captured_without_orders_or_authority(string text)
+    {
+        using var rig = new Rig(text, "reported_fact");
+        rig.Provider.CurrentCandidate = rig.Provider.CurrentCandidate with { Statement = text, Content = text, AuthorityReference = null, AuthorityQuote = null };
+        var receipt = await rig.Run();
+        receipt.Status.ShouldBe("processed");
+        var write = rig.Core.Commits.ShouldHaveSingleItem().Items.ShouldHaveSingleItem();
+        write.Statement.ShouldBe(text);
+        write.Sources.ShouldHaveSingleItem().Evidence!.Category.ShouldBe("reported_fact");
+        write.Sources[0].Evidence!.Authority.ShouldBeNull();
+        rig.Judge.Inputs.ShouldAllBe(input => !input.Contains("explicit_user_evidence"));
+    }
+
+    [Fact]
+    public async Task Examined_context_without_learning_is_a_successful_no_op()
+    {
+        using var rig = new Rig("Thanks!", "unknown");
+        rig.Provider.ExtractionOverride = new Extraction([], NoLearningSourceIds: ["m1"]);
+        var receipt = await rig.Run();
+        receipt.Status.ShouldBe("processed");
+        receipt.Changes.ShouldBeEmpty();
+        receipt.Questions.ShouldBeEmpty();
+        rig.Core.Commits.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task No_learning_cannot_hide_an_unexamined_source()
+    {
+        using var rig = new Rig("A useful rule remains unexplored.", "unknown");
+        rig.Provider.ExtractionOverride = new Extraction([], UnexaminedSourceIds: ["m1"], NoLearningSourceIds: ["m1"]);
+        var receipt = await rig.Run();
+        receipt.Status.ShouldBe("needs_input");
+        receipt.Deferred.ShouldNotBeEmpty();
+        rig.Core.Commits.ShouldBeEmpty();
+    }
+
+    [Theory]
     [InlineData("observed_implementation", "The change has not shipped.")]
     [InlineData("observed_implementation", "It was never deployed.")]
     [InlineData("approved_intent", "I never approved this change.")]
@@ -18,9 +58,13 @@ public sealed class IndependentAcceptanceTests
     public async Task Misclassified_negative_or_quoted_evidence_cannot_promote(string category, string quote)
     {
         using var rig = new Rig(quote, category);
+        rig.Judge.AuthoritySupport = "unsupported";
         CaptureReceipt receipt = await rig.Run();
-        rig.Core.Commits.ShouldBeEmpty();
-        receipt.Status.ShouldNotBe("processed");
+        receipt.Status.ShouldBe("processed");
+        var write = rig.Core.Commits.ShouldHaveSingleItem().Items.ShouldHaveSingleItem();
+        write.Status.ShouldBe("proposed");
+        write.Sources.ShouldHaveSingleItem().Evidence!.Category.ShouldBe("unknown");
+        write.Statement.ShouldStartWith("Unconfirmed claim:");
     }
 
     [Fact]
@@ -39,11 +83,15 @@ public sealed class IndependentAcceptanceTests
     {
         using var rig = new Rig("We shipped nothing. This change is still only planned.", "observed_implementation", "We shipped");
         await rig.Run();
-        rig.Core.Commits.ShouldBeEmpty();
+        var write = rig.Core.Commits.ShouldHaveSingleItem().Items.ShouldHaveSingleItem();
+        write.Status.ShouldBe("proposed");
+        write.Sources.ShouldHaveSingleItem().Evidence!.AuthorityQuote.ShouldBeNull();
     }
 
     [Theory]
     [InlineData("I approve the midnight counter rule for future implementation; it has not shipped.")]
+    [InlineData("Let's make the counter reset at midnight.")]
+    [InlineData("Actually, midnight is what I want for the reset.")]
     [InlineData("As the authorized product owner, I explicitly approve the midnight counter rule for future implementation. It has not shipped.")]
     public async Task Approved_future_intent_remains_intent_and_is_preserved(string source)
     {
@@ -200,8 +248,40 @@ public sealed class IndependentAcceptanceTests
         using var rig = new Rig("I approve the investigation into a future counter rule.", "approved_intent");
         rig.Judge.AuthoritySupport = "unsupported";
         var receipt = await rig.Run();
-        receipt.ErrorClass.ShouldBe("authority_evidence_missing");
-        rig.Core.Commits.ShouldBeEmpty();
+        receipt.Status.ShouldBe("processed");
+        receipt.ErrorClass.ShouldBeNull();
+        var write = rig.Core.Commits.ShouldHaveSingleItem().Items.ShouldHaveSingleItem();
+        write.Status.ShouldBe("proposed");
+        write.Sources.ShouldHaveSingleItem().Evidence!.Category.ShouldBe("unknown");
+    }
+
+    [Fact]
+    public async Task Short_assent_is_judged_with_the_question_and_preserves_both_sources()
+    {
+        using var rig = new Rig("yes, do that", "approved_intent");
+        rig.Provider.CurrentCandidate = rig.Provider.CurrentCandidate with { SourceIds = ["question", "m1"] };
+        var receipt = await rig.Workflow.AcceptAsync(new CaptureRequest("contextual-assent", "Synthetic decision", [new Message("question", "assistant", 0, "Should the counter reset at midnight?"), new Message("m1", "user", 1, "yes, do that")], new Selectors("synthetic/reviewer")), CancellationToken.None);
+        await rig.Workflow.ProcessAsync(receipt.Id, CancellationToken.None);
+        rig.Workflow.Get(receipt.Id)!.Status.ShouldBe("processed");
+        rig.Judge.Inputs.ShouldContain(input => input.Contains("Should the counter reset at midnight?") && input.Contains("yes, do that"));
+        var write = rig.Core.Commits.ShouldHaveSingleItem().Items.ShouldHaveSingleItem();
+        write.Status.ShouldBe("approved");
+        write.Sources.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Missing_authority_does_not_block_other_learning_or_replace_approved_knowledge()
+    {
+        using var rig = new Rig("Maybe the counter resets at midnight.", "approved_intent");
+        rig.Provider.CurrentCandidate = rig.Provider.CurrentCandidate with { AuthorityReference = "absent" };
+        rig.Provider.AdditionalCandidates = [new Candidate("Preference", "display preference", "Use a compact display.", "User preference under discussion.", "fact", "suggestion", ["m1"], null, null, "This project")];
+        rig.Core.Records = [Record(rig.Core.Resolved.Uuid) with { Status = "approved" }];
+        var receipt = await rig.Run();
+        receipt.Status.ShouldBe("processed");
+        var writes = rig.Core.Commits.ShouldHaveSingleItem().Items;
+        writes.Count.ShouldBe(2);
+        writes.ShouldAllBe(write => write.Status == "proposed" && write.Uuid == null);
+        writes.ShouldContain(write => write.Statement.StartsWith("Unconfirmed claim:"));
     }
 
     [Fact]
@@ -675,12 +755,13 @@ public sealed class IndependentAcceptanceTests
         public Guid? Target { get; set; }
         public Candidate CurrentCandidate { get; set; } = candidate;
         public bool HasMore { get; set; }
+        public Extraction? ExtractionOverride { get; set; }
         public IReadOnlyList<Candidate> AdditionalCandidates { get; set; } = [];
         public Task<ProviderResult<T>> GenerateAsync<T>(string instructions, object data, int outputLimit, bool stronger, CancellationToken ct)
         {
             Calls++;
             Inputs.Add(KnowledgeJson.Serialize(data));
-            object result = typeof(T) == typeof(Extraction) ? new Extraction([CurrentCandidate, .. AdditionalCandidates], HasMore: HasMore) : typeof(T) == typeof(Comparison) ? new Comparison("equivalent", Target, "Fixture equivalent") : typeof(T) == typeof(Intent) ? new Intent(["What is the counter rule?"], ["counter", "midnight"]) : throw new InvalidOperationException("Unexpected provider operation.");
+            object result = typeof(T) == typeof(Extraction) ? ExtractionOverride ?? new Extraction([CurrentCandidate, .. AdditionalCandidates], HasMore: HasMore) : typeof(T) == typeof(Comparison) ? new Comparison("equivalent", Target, "Fixture equivalent") : typeof(T) == typeof(Intent) ? new Intent(["What is the counter rule?"], ["counter", "midnight"]) : throw new InvalidOperationException("Unexpected provider operation.");
             return Task.FromResult(new ProviderResult<T>((T)result, Model, 10, 10));
         }
     }

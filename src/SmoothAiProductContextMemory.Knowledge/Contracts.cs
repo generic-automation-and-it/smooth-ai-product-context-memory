@@ -31,7 +31,7 @@ public sealed record ContextResponse(Guid RequestId, string Brief, IReadOnlyList
 public sealed record Intent(IReadOnlyList<string> Questions, IReadOnlyList<string> Queries);
 public sealed record Candidate(string Name, string Subject, string Statement, string Content, string Kind, string Category, IReadOnlyList<string> SourceIds, string? AuthorityReference, string? AuthorityQuote, string Applicability);
 public sealed record DeferredClaim(IReadOnlyList<string> SourceIds, string Subject, string Reason);
-public sealed record Extraction(IReadOnlyList<Candidate> Claims, IReadOnlyList<string>? UnexaminedSourceIds = null, bool HasMore = false, IReadOnlyList<DeferredClaim>? UnexaminedClaims = null);
+public sealed record Extraction(IReadOnlyList<Candidate> Claims, IReadOnlyList<string>? UnexaminedSourceIds = null, bool HasMore = false, IReadOnlyList<DeferredClaim>? UnexaminedClaims = null, IReadOnlyList<string>? NoLearningSourceIds = null);
 public sealed record Comparison(string Relation, Guid? TargetUuid, string Reason);
 public sealed record Change(string Action, Candidate Candidate, Evidence? Target, Guid CreateUuid, string Reason);
 public sealed record CorpusState(Guid Epoch, long Revision);

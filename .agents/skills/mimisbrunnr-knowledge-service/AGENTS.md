@@ -14,3 +14,7 @@ Run `python -m unittest discover -s .agents/skills/mimisbrunnr-knowledge-service
 | 2026-10-03 | Added explicit restore reconciliation transport: operator pins previous/current epochs, acknowledges restore, preserves identical retry JSON, and supplies extra allowance only explicitly. Public recovery/audit/deadline fields are documented. |
 | 2026-10-03 | Caller sends stable task ID as the optional source namespace; namespaces stay constant across incremental captures, differ across conversations, and participate in handoff retry identity. Older uncertain requests must be replayed unchanged before adopting the additive field. |
 | 2026-10-03 | Added two-operation caller skill, protected stdlib transport, stable incremental handoff state, receipt polling and clarification. Explicit end-task fallback covers runtimes without compaction hooks. |
+
+| 2026-10-24 | Caller shares context at meaningful incremental checkpoints; Mimi owns novelty/classification. Preserve question/answer context and never manufacture approval wording. |
+
+Incremental requests retain explicitly supplied previously acknowledged messages when new IDs are present, to preserve context. All-acknowledged requests remain no-ops; immutable source references preserve deduplication. Retry uncertain pre-upgrade payloads unchanged.

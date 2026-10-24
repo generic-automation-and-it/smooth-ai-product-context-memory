@@ -15,3 +15,7 @@ Package the canonical direct-mode `atomicity.py` too. Apply the same detector be
 | Date | Change |
 |---|---|
 | 2026-10-03 | Added optional bounded HTTP-only orchestration, durable capture journal and budget reservations. |
+
+| 2026-10-24 | Natural-language authority is assessed against the full attributed conversation, without approval phrase matching. Missing or unsupported authority retains an explicitly unconfirmed proposed claim and re-compares it; it does not abort unrelated learning. Exact full-message provenance remains required for promotion. |
+
+Ordinary facts, explanations, preferences and attributed findings use reported_fact and require no authority fields. Fully examined messages with no reusable knowledge use noLearningSourceIds so an empty extraction can complete without writes or questions. The service owns novelty comparison; callers send context at meaningful checkpoints, not preclassified records.

@@ -120,7 +120,7 @@ public sealed class SafetyTests
     {
         var schema = OpenAiProvider.Schema(typeof(Extraction));
         var categories = schema["properties"]!["claims"]!["items"]!["properties"]!["category"]!["enum"]!.AsArray().Select(value => value!.GetValue<string>()).ToArray();
-        categories.ShouldBe(["suggestion", "document_approval", "approved_intent", "observed_implementation", "unknown"]);
+        categories.ShouldBe(["reported_fact", "suggestion", "document_approval", "approved_intent", "observed_implementation", "unknown"]);
     }
 
     [Fact]

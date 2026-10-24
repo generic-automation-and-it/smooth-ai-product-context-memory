@@ -300,3 +300,7 @@ sequenceDiagram
 | 2026-09-27 | The group-scoping fix on the version-target lookup is now covered: a version target in another group is reported not-found and the owning memory is left at one still-current version with its original statement. Verified to fail against the pre-fix lookup. | PR #118 review |
 | 2026-10-01 | Group-scoped identity is now pinned from the create side as well: `SetMemoriesHandlerTests.Same_subject_in_two_groups_creates_two_distinct_memories` writes one subject under two groups (dry run and real) and asserts two memories with the same subject slug, each in its own group with one version — no conflict, no version bump. Unscoping the subject-slug lookup in `SetMemories` fails it with `ConflictException`. The foreign-version-target counterpart already existed. | HLD-002 LADR-01, LADR-04 |
 | 2026-10-02 | `SnapshotRecency.Format` extracted from `SnapshotPreflight` so the preflight report and the startup migration posture share one recency wording; `MigrationPosture` carries the count plus that text (`no snapshot recorded` when absent). No behaviour change to the preflight. | HLD-006 LADR-04 |
+
+## Conversational knowledge — October 24, 2026
+
+Evidence shape 1 also accepts reported_fact for attributed facts, preferences and explanations. This category does not assert approval or deployment and needs no authority phrase. Existing status and immutable provenance semantics are unchanged.

@@ -13,6 +13,7 @@ public class SetMemoriesValidatorTests
 
     [Theory]
     [InlineData("document_approval", 1, true)]
+    [InlineData("reported_fact", 1, true)]
     [InlineData("approved_document", 1, false)]
     [InlineData("document_approval", 2, false)]
     public void Document_approval_uses_the_explicit_shape_one_evidence_contract(string category, int shape, bool accepted)

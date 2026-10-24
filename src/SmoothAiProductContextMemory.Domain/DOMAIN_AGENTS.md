@@ -6,7 +6,7 @@ Pure domain model — entities, aggregate roots, and value objects. NodaTime sup
 
 ## Evidence metadata — October 3, 2026
 
-`SourceDocument.Evidence` is an optional versioned JSON shape, stored inside the existing immutable `sources` column. It records `suggestion`, `document_approval`, `approved_intent`, `observed_implementation`, or `unknown`, with applicability, authority references/quotes, and source scope. Document/design approval does not establish approved product intent or shipped behavior. Absent metadata on legacy sources remains unknown. Memory status and evidence category are separate axes; approval alone does not establish shipped behavior. Evidence follows source provenance through ordinary reads, exports, and snapshots; attaching evidence to an equivalent claim uses a new append-only version.
+`SourceDocument.Evidence` is an optional versioned JSON shape, stored inside the existing immutable `sources` column. It records `reported_fact` (attributed knowledge without approval), `suggestion`, `document_approval`, `approved_intent`, `observed_implementation`, or `unknown`, with applicability, authority references/quotes, and source scope. Document/design approval does not establish approved product intent or shipped behavior. Absent metadata on legacy sources remains unknown. Memory status and evidence category are separate axes; approval alone does not establish shipped behavior. Evidence follows source provenance through ordinary reads, exports, and snapshots; attaching evidence to an equivalent claim uses a new append-only version.
 
 ## Non-Negotiables
 
