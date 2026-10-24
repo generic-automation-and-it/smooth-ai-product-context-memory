@@ -138,11 +138,11 @@ public sealed class CaptureJournal
             var limits = job.Budget.Limits;
             if (request.AdditionalBudget is { } extra)
             {
-                if (extra.Calls is < 0 or > 12 || extra.InputTokens is < 0 or > 100000 || extra.OutputTokens is < 0 or > 12000 || extra.Dollars is < 0 or > 2 || extra.DeadlineSeconds is < 1 or > 120) throw new KnowledgeException("invalid_additional_budget");
+                if (extra.Calls is < 0 or > 40 || extra.InputTokens is < 0 or > 100000 || extra.OutputTokens is < 0 or > 12000 || extra.Dollars is < 0 or > 2 || extra.DeadlineSeconds is < 1 or > 120) throw new KnowledgeException("invalid_additional_budget");
                 limits = new BudgetLimits(limits.Calls + extra.Calls, limits.InputTokens + extra.InputTokens, limits.OutputTokens + extra.OutputTokens, limits.Dollars + extra.Dollars, extra.DeadlineSeconds);
             }
             bool newEvidence = request.Messages.Count > 0 || request.Selectors is not null;
-            job = job with { Input = job.Input with { Messages = messages, Selectors = request.Selectors ?? job.Input.Selectors }, GroupUuid = request.Selectors is null ? job.GroupUuid : null, PendingGroupOperation = request.Selectors is null ? job.PendingGroupOperation : null, Status = "received", Budget = job.Budget with { Limits = limits }, DeadlineUtc = ExtendDeadline(job.DeadlineUtc, request.AdditionalBudget), Plan = newEvidence ? null : job.Plan, Candidates = newEvidence ? null : job.Candidates, ComparisonIndex = newEvidence ? 0 : job.ComparisonIndex, Deferred = newEvidence ? [] : job.Deferred, Questions = newEvidence ? [] : job.Questions, ErrorClass = null };
+            job = job with { Input = job.Input with { Messages = messages, Selectors = request.Selectors ?? job.Input.Selectors }, GroupUuid = request.Selectors is null ? job.GroupUuid : null, PendingGroupOperation = request.Selectors is null ? job.PendingGroupOperation : null, Status = "received", Budget = job.Budget with { Limits = limits }, DeadlineUtc = ExtendDeadline(job.DeadlineUtc, request.AdditionalBudget), Plan = newEvidence ? null : job.Plan, Candidates = newEvidence ? null : job.Candidates, ComparisonIndex = newEvidence ? 0 : job.ComparisonIndex, CommittedPlanCount = newEvidence ? 0 : job.CommittedPlanCount, Deferred = newEvidence ? [] : job.Deferred, Questions = newEvidence ? [] : job.Questions, ErrorClass = null };
             string body = KnowledgeJson.Serialize(job);
             EnsureCapacity(connection, transaction, JobAllowance);
             using var command = connection.CreateCommand();
@@ -188,13 +188,13 @@ public sealed class CaptureJournal
             var limits = job.Budget.Limits;
             if (request.AdditionalBudget is { } extra)
             {
-                if (extra.Calls is < 0 or > 12 || extra.InputTokens is < 0 or > 100000 || extra.OutputTokens is < 0 or > 12000 || extra.Dollars is < 0 or > 2 || extra.DeadlineSeconds is < 1 or > 120) throw new KnowledgeException("invalid_additional_budget");
+                if (extra.Calls is < 0 or > 40 || extra.InputTokens is < 0 or > 100000 || extra.OutputTokens is < 0 or > 12000 || extra.Dollars is < 0 or > 2 || extra.DeadlineSeconds is < 1 or > 120) throw new KnowledgeException("invalid_additional_budget");
                 limits = new BudgetLimits(limits.Calls + extra.Calls, limits.InputTokens + extra.InputTokens, limits.OutputTokens + extra.OutputTokens, limits.Dollars + extra.Dollars, extra.DeadlineSeconds);
             }
             int generation = job.Generation + 1;
             var summary = new ReconciliationSummary(generation, job.Corpus.Epoch, current.Epoch, job.Committed.Select(batch => batch.OperationKey).ToArray(), job.PendingCommit?.OperationKey ?? job.PendingGroupOperation, job.Plan is null ? null : Hash(KnowledgeJson.Serialize(job.Plan)), job.Budget.Usage with { OutstandingReservations = job.Budget.Reservations.Count }, DateTimeOffset.UtcNow, job.PendingCommit is null ? null : Hash(KnowledgeJson.Serialize(job.PendingCommit)));
             var audit = new ReconciliationAudit(summary, job.Committed, job.Plan, job.PendingCommit, job.PendingGroupOperation);
-            job = job with { Status = "received", Corpus = current, GroupUuid = null, Plan = null, PendingCommit = null, PendingGroupOperation = null, Committed = [], Candidates = null, ComparisonIndex = 0, Generation = generation, Reconciliations = [.. job.Reconciliations ?? [], audit], Deferred = [], Questions = [], ErrorClass = null, Budget = job.Budget with { Limits = limits }, DeadlineUtc = ExtendDeadline(job.DeadlineUtc, request.AdditionalBudget), SourceNamespace = job.SourceNamespace ?? job.Input.SourceNamespace ?? job.Id.ToString(), WorkflowVersion = Workflow.Version };
+            job = job with { Status = "received", Corpus = current, GroupUuid = null, Plan = null, PendingCommit = null, PendingGroupOperation = null, Committed = [], Candidates = null, ComparisonIndex = 0, CommittedPlanCount = 0, PendingPlanCount = 0, Generation = generation, Reconciliations = [.. job.Reconciliations ?? [], audit], Deferred = [], Questions = [], ErrorClass = null, Budget = job.Budget with { Limits = limits }, DeadlineUtc = ExtendDeadline(job.DeadlineUtc, request.AdditionalBudget), SourceNamespace = job.SourceNamespace ?? job.Input.SourceNamespace ?? job.Id.ToString(), WorkflowVersion = Workflow.Version };
             string body = KnowledgeJson.Serialize(job);
             if (Encoding.UTF8.GetByteCount(body) > JobAllowance) throw new KnowledgeException("job_storage_limit");
             EnsureCapacity(connection, transaction, Encoding.UTF8.GetByteCount(body));

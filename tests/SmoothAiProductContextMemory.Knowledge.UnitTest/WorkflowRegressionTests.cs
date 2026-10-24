@@ -57,8 +57,9 @@ public sealed class WorkflowRegressionTests
         await rig.Journal.SaveAsync(job with { Budget = job.Budget with { Limits = job.Budget.Limits with { Calls = 4 } } }, TestContext.Current.CancellationToken);
         await rig.Workflow.ProcessAsync(ack.Id, TestContext.Current.CancellationToken);
         rig.Journal.Get(ack.Id)!.Candidates!.Count.ShouldBe(25);
-        rig.Workflow.Get(ack.Id)!.ErrorClass.ShouldBe("budget_exhausted");
-        rig.Core.Commits.ShouldBeEmpty();
+        rig.Workflow.Get(ack.Id)!.ErrorClass.ShouldBe(rejectPreflight ? "core_commit_400" : "budget_exhausted");
+        if (rejectPreflight) rig.Core.Commits.ShouldBeEmpty();
+        else rig.Core.Commits.ShouldHaveSingleItem().Items.Count.ShouldBeGreaterThan(0);
         int spent = rig.Journal.Get(ack.Id)!.Budget.Usage.Calls;
         for (int continuation = 0; continuation < 2; continuation++)
         {
@@ -68,7 +69,15 @@ public sealed class WorkflowRegressionTests
         }
         rig.Journal.Get(ack.Id)!.Plan!.Count.ShouldBe(25);
         if (rejectPreflight) { rig.Core.Commits.ShouldBeEmpty(); rig.Workflow.Get(ack.Id)!.ErrorClass.ShouldBe("core_commit_400"); }
-        else { rig.Core.Commits.Count.ShouldBe(1); rig.Core.Commits.Single().Items.Count.ShouldBe(25); rig.Core.Commits.Single().Items.Count(item => item.Uuid is not null).ShouldBe(1); rig.Workflow.Get(ack.Id)!.Status.ShouldBe("processed"); }
+        else
+        {
+            var writes = rig.Core.Commits.SelectMany(commit => commit.Items).ToArray();
+            writes.Length.ShouldBe(25);
+            writes.Count(item => item.Uuid is not null).ShouldBe(1);
+            writes.Select(item => item.CreateUuid ?? item.Uuid).Distinct().Count().ShouldBe(25);
+            rig.Workflow.Get(ack.Id)!.Status.ShouldBe("processed");
+            rig.Workflow.Get(ack.Id)!.RemainingClaims.ShouldBe(0);
+        }
     }
 
     private static string? JsonCandidateName(object state)

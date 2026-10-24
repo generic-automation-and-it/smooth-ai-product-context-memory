@@ -653,41 +653,98 @@ public sealed class IndependentAcceptanceTests
     }
 
     [Fact]
-    public async Task Twenty_five_mixed_claims_survive_budget_interruptions_and_commit_only_after_full_comparison()
+    public async Task Forty_call_default_finishes_twenty_five_claims_with_unchanged_cost_ceiling()
     {
-        using var rig = new Rig("Synthetic source with one known counter claim and twenty-four independent new proposals.", "suggestion");
+        using var rig = new Rig("Synthetic independent proposals.", "reported_fact");
+        rig.Provider.AdditionalCandidates = Enumerable.Range(1, 24).Select(index => rig.Provider.CurrentCandidate with { Subject = "new fact " + index }).ToArray();
+        var receipt = await rig.Run();
+        receipt.Status.ShouldBe("processed");
+        receipt.RemainingClaims.ShouldBe(0);
+        receipt.Usage.Calls.ShouldBe(26);
+        rig.Journal.Get(receipt.Id)!.Budget.Limits.Calls.ShouldBe(40);
+        rig.Journal.Get(receipt.Id)!.Budget.Limits.Dollars.ShouldBe(2m);
+        rig.Journal.Get(receipt.Id)!.Budget.Limits.DeadlineSeconds.ShouldBe(120);
+        rig.Core.Commits.ShouldHaveSingleItem().Items.Count.ShouldBe(25);
+    }
+
+    [Fact]
+    public async Task Budget_interruption_commits_compared_prefix_and_resumes_without_duplicate_writes()
+    {
+        using var rig = new Rig("Synthetic source with one known claim and twenty-four new facts.", "reported_fact");
         rig.Core.Records = [Record(rig.Core.Resolved.Uuid)];
         rig.Provider.Target = rig.Core.Records[0].Uuid;
-        rig.Provider.AdditionalCandidates = Enumerable.Range(1, 24).Select(index => rig.Provider.CurrentCandidate with { Name = "New proposal " + index, Subject = "new proposal " + index, Statement = "Independent proposal " + index }).ToArray();
+        rig.Provider.AdditionalCandidates = Enumerable.Range(1, 24).Select(index => rig.Provider.CurrentCandidate with { Name = "New fact " + index, Subject = "new fact " + index, Statement = "Independent fact " + index }).ToArray();
         rig.Judge.Relations = new Queue<string>(new[] { "equivalent" }.Concat(Enumerable.Repeat("new", 24)));
-        var receipt = await rig.Run();
+        var receipt = await rig.Run(limits: new BudgetLimits(Calls: 12));
         receipt.Status.ShouldBe("partial");
         receipt.ErrorClass.ShouldBe("budget_exhausted");
-        rig.Journal.Get(receipt.Id)!.Candidates!.Count.ShouldBe(25);
         int firstIndex = rig.Journal.Get(receipt.Id)!.ComparisonIndex;
         firstIndex.ShouldBeGreaterThan(0);
-        firstIndex.ShouldBeLessThan(25);
-        rig.Core.Commits.ShouldBeEmpty();
+        receipt.RemainingClaims.ShouldBe(25 - firstIndex);
+        rig.Core.Commits.ShouldHaveSingleItem().Items.Count.ShouldBe(firstIndex);
+        rig.Journal.Get(receipt.Id)!.CommittedPlanCount.ShouldBe(firstIndex);
+        // A concurrent writer must not discard or replay the already committed prefix.
+        rig.Core.State = rig.Core.State with { Revision = rig.Core.State.Revision + 1 };
         var reopened = new CaptureJournal(rig.DatabasePath);
         var workflow = new Workflow(rig.Core, rig.Core, rig.Provider, rig.Judge, new IdentitySecrets(), reopened);
-        for (int attempt = 1; attempt <= 2; attempt++)
-        {
-            await workflow.ClarifyAsync(receipt.Id, new ClarificationRequest("continue-budget-" + attempt, [], new BudgetLimits()), CancellationToken.None);
-            await workflow.ProcessAsync(receipt.Id, CancellationToken.None);
-            if (attempt == 1)
-            {
-                workflow.Get(receipt.Id)!.Status.ShouldBe("partial");
-                rig.Core.Commits.ShouldBeEmpty();
-                reopened.Get(receipt.Id)!.ComparisonIndex.ShouldBeGreaterThan(firstIndex);
-            }
-        }
+        await workflow.ClarifyAsync(receipt.Id, new ClarificationRequest("continue-budget", [], new BudgetLimits()), CancellationToken.None);
+        await workflow.ProcessAsync(receipt.Id, CancellationToken.None);
         workflow.Get(receipt.Id)!.Status.ShouldBe("processed");
-        workflow.Get(receipt.Id)!.Usage.Calls.ShouldBeGreaterThan(24);
-        var writes = rig.Core.Commits.ShouldHaveSingleItem().Items;
-        writes.Count.ShouldBe(25);
+        workflow.Get(receipt.Id)!.RemainingClaims.ShouldBe(0);
+        var writes = rig.Core.Commits.SelectMany(commit => commit.Items).ToArray();
+        writes.Length.ShouldBe(25);
         writes.Count(write => write.Uuid == rig.Provider.Target).ShouldBe(1);
-        writes.Count(write => write.Uuid is null && write.CreateUuid is not null).ShouldBe(24);
-        reopened.Get(receipt.Id)!.ComparisonIndex.ShouldBe(25);
+        writes.Select(write => write.CreateUuid ?? write.Uuid).Distinct().Count().ShouldBe(25);
+        reopened.Get(receipt.Id)!.CommittedPlanCount.ShouldBe(25);
+    }
+
+    [Fact]
+    public async Task Preview_does_not_commit_a_budget_limited_prefix()
+    {
+        using var rig = new Rig("Synthetic independent facts.", "reported_fact");
+        rig.Provider.AdditionalCandidates = Enumerable.Range(1, 5).Select(index => rig.Provider.CurrentCandidate with { Subject = "fact " + index }).ToArray();
+        var receipt = await rig.Run(preview: true, limits: new BudgetLimits(Calls: 3));
+        receipt.Status.ShouldBe("partial");
+        receipt.RemainingClaims.ShouldBeGreaterThan(0);
+        rig.Core.Commits.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Comparison_deadline_reserves_time_to_commit_completed_work()
+    {
+        using var rig = new Rig("Synthetic independent facts.", "reported_fact");
+        rig.Provider.AdditionalCandidates = Enumerable.Range(1, 2).Select(index => rig.Provider.CurrentCandidate with { Subject = "fact " + index }).ToArray();
+        rig.Judge.DelayOnRelationCall = 2;
+        var receipt = await rig.Workflow.AcceptAsync(new CaptureRequest("time-checkpoint", "Synthetic deadline checkpoint", [new Message("m1", "user", 1, "Synthetic independent facts.")], new Selectors("synthetic/reviewer")), CancellationToken.None);
+        var job = rig.Journal.Get(receipt.Id)!;
+        await rig.Journal.SaveAsync(job with { DeadlineUtc = DateTimeOffset.UtcNow.AddSeconds(10.8) }, CancellationToken.None);
+        await rig.Workflow.ProcessAsync(receipt.Id, CancellationToken.None);
+        var partial = rig.Workflow.Get(receipt.Id)!;
+        partial.Status.ShouldBe("partial");
+        partial.ErrorClass.ShouldBe("deadline_exhausted");
+        partial.RemainingClaims.ShouldBe(2);
+        rig.Core.Commits.ShouldHaveSingleItem().Items.ShouldHaveSingleItem();
+        rig.Journal.Get(receipt.Id)!.CommittedPlanCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Lost_partial_commit_response_replays_exact_payload_and_marks_its_checkpoint()
+    {
+        using var rig = new Rig("Synthetic facts.", "reported_fact");
+        rig.Provider.AdditionalCandidates = Enumerable.Range(1, 5).Select(index => rig.Provider.CurrentCandidate with { Subject = "fact " + index }).ToArray();
+        rig.Core.FailAfterCommit = true;
+        var receipt = await rig.Run(limits: new BudgetLimits(Calls: 3));
+        var pending = rig.Journal.Get(receipt.Id)!.PendingCommit!;
+        var reopened = new CaptureJournal(rig.DatabasePath);
+        var partial = reopened.Get(receipt.Id)!;
+        await reopened.SaveAsync(partial with { Status = "processing" }, CancellationToken.None);
+        var workflow = new Workflow(rig.Core, rig.Core, rig.Provider, rig.Judge, new IdentitySecrets(), reopened);
+        await workflow.ProcessAsync(receipt.Id, CancellationToken.None);
+        rig.Core.Commits.Count.ShouldBe(2); // Two dispatches of the same idempotent operation.
+        KnowledgeJson.Serialize(rig.Core.Commits[1]).ShouldBe(KnowledgeJson.Serialize(pending));
+        reopened.Get(receipt.Id)!.CommittedPlanCount.ShouldBe(2);
+        workflow.Get(receipt.Id)!.RemainingClaims.ShouldBe(4);
+        reopened.Get(receipt.Id)!.PendingCommit.ShouldBeNull();
     }
 
     [Fact]
@@ -721,9 +778,14 @@ public sealed class IndependentAcceptanceTests
             Journal = new CaptureJournal(DatabasePath);
             Workflow = new Workflow(Core, Core, Provider, Judge, new IdentitySecrets(), Journal);
         }
-        public async Task<CaptureReceipt> Run(bool preview = false)
+        public async Task<CaptureReceipt> Run(bool preview = false, BudgetLimits? limits = null)
         {
             var receipt = await Workflow.AcceptAsync(new CaptureRequest("test", "Review synthetic behavior", [new Message("m1", "user", 1, text)], new Selectors("synthetic/reviewer"), Preview: preview), CancellationToken.None);
+            if (limits is not null)
+            {
+                var accepted = Journal.Get(receipt.Id)!;
+                await Journal.SaveAsync(accepted with { Budget = BudgetLedger.Start(limits) }, CancellationToken.None);
+            }
             await Workflow.ProcessAsync(receipt.Id, CancellationToken.None);
             return Workflow.Get(receipt.Id)!;
         }
@@ -773,11 +835,15 @@ public sealed class IndependentAcceptanceTests
         public string CoverageAnswer { get; set; } = "supported";
         public Queue<string> Relations { get; set; } = new();
         public List<string> Inputs { get; } = [];
-        public Task<ProviderResult<IReadOnlyDictionary<string, string>>> ChoicesAsync(object state, IReadOnlyDictionary<string, ChoiceQuestion> questions, CancellationToken ct)
+        public int DelayOnRelationCall { get; set; }
+        private int relationCalls;
+        public async Task<ProviderResult<IReadOnlyDictionary<string, string>>> ChoicesAsync(object state, IReadOnlyDictionary<string, ChoiceQuestion> questions, CancellationToken ct)
         {
+            if (questions.ContainsKey("relation") && ++relationCalls == DelayOnRelationCall)
+                await Task.Delay(Timeout.Infinite, ct);
             Inputs.Add(KnowledgeJson.Serialize(state));
             IReadOnlyDictionary<string, string> answers = questions.ToDictionary(q => q.Key, q => q.Key == "relation" ? (Relations.TryDequeue(out var next) ? next : Relation) : q.Key == "authority_support" ? AuthoritySupport : CoverageAnswer);
-            return Task.FromResult(new ProviderResult<IReadOnlyDictionary<string, string>>(answers, Model, 10, 10));
+            return new ProviderResult<IReadOnlyDictionary<string, string>>(answers, Model, 10, 10);
         }
     }
     private sealed class FakeCore : ICoreReader, ICoreCommitter

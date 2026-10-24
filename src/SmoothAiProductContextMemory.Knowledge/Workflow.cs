@@ -183,7 +183,7 @@ public sealed class Workflow(ICoreReader core, ICoreCommitter committer, IGenera
             if (job.PendingCommit is { } pending)
             {
                 var result = await committer.CommitAsync(pending, ct);
-                job = job with { Committed = [.. job.Committed, new CommittedBatch(pending.OperationKey!, result)], PendingCommit = null };
+                job = job with { Committed = [.. job.Committed, new CommittedBatch(pending.OperationKey!, result)], PendingCommit = null, CommittedPlanCount = job.PendingPlanCount > 0 ? job.PendingPlanCount : (job.Plan?.Count ?? 0), PendingPlanCount = 0, Corpus = await core.StateAsync(ct) };
                 await journal.SaveAsync(job, ct);
             }
             if (job.GroupUuid is null)
@@ -228,111 +228,132 @@ public sealed class Workflow(ICoreReader core, ICoreCommitter committer, IGenera
                 if ((extraction.NoLearningSourceIds ?? []).Any(source => input.Messages.All(message => message.Id != source))) throw new KnowledgeException("invalid_extraction_coverage");
                 var missingSources = input.Messages.Where(message => extraction.Claims.All(claim => !claim.SourceIds.Contains(message.Id)) && !(extraction.NoLearningSourceIds ?? []).Contains(message.Id)).Select(message => message.Id).Concat(extraction.UnexaminedSourceIds ?? []).Distinct().Select(source => "Unexamined source: " + source).ToArray();
                 var unexamined = missingSources.Concat((extraction.UnexaminedClaims ?? []).Select(claim => $"Unexamined claim: {claim.Subject}; sources: {string.Join(",", claim.SourceIds)}; {claim.Reason}")).ToArray();
-                job = job with { Candidates = extraction.Claims, Plan = [], Corpus = state, ComparisonIndex = 0, Deferred = extraction.HasMore ? [.. unexamined, "Additional atomic claims exceeded this extraction pass; the unexamined count is unknown unless named above. Submit remaining evidence in a continuation."] : unexamined };
+                job = job with { Candidates = extraction.Claims, Plan = [], Corpus = state, ComparisonIndex = 0, CommittedPlanCount = 0, PendingPlanCount = 0, Deferred = extraction.HasMore ? [.. unexamined, "Additional atomic claims exceeded this extraction pass; the unexamined count is unknown unless named above. Submit remaining evidence in a continuation."] : unexamined };
                 await journal.SaveAsync(job, ct);
             }
-            if (job.Committed.Count == 0)
             {
                 var comparisonState = await core.StateAsync(ct);
                 if (job.Corpus!.Epoch != comparisonState.Epoch) throw new KnowledgeException("corpus_epoch_changed");
                 if (job.Corpus.Revision != comparisonState.Revision)
                 {
-                    job = job with { Corpus = comparisonState, Plan = [], ComparisonIndex = 0, Deferred = job.Deferred.Where(item => item != CorpusChangedNotice).ToArray() };
+                    job = job with { Corpus = comparisonState, Plan = (job.Plan ?? []).Take(job.CommittedPlanCount).ToArray(), ComparisonIndex = job.CommittedPlanCount, Deferred = job.Deferred.Where(item => item != CorpusChangedNotice).ToArray() };
                     await journal.SaveAsync(job, ct);
                 }
             }
-            if (job.ComparisonIndex < job.Candidates.Count)
+            string? comparisonStop = null;
+            using var comparisonDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var comparisonTime = job.DeadlineUtc!.Value - DateTimeOffset.UtcNow - TimeSpan.FromSeconds(10);
+            if (comparisonTime <= TimeSpan.Zero) comparisonDeadline.Cancel();
+            else comparisonDeadline.CancelAfter(comparisonTime);
+            var comparisonCt = comparisonDeadline.Token;
+            try
             {
-                var plan = new List<Change>(job.Plan ?? []);
-                foreach (var extracted in job.Candidates.Skip(job.ComparisonIndex))
+                if (job.ComparisonIndex < job.Candidates.Count)
                 {
-                    var candidate = extracted;
-                    ValidateCandidate(candidate, input);
-                    if (candidate.Category is "approved_intent" or "observed_implementation" && !CanPromote(candidate, input))
-                        candidate = Unconfirmed(candidate);
-                    if (candidate.Category is not ("approved_intent" or "observed_implementation"))
-                        candidate = candidate with { AuthorityReference = null, AuthorityQuote = null };
-                    var related = new Dictionary<string, Evidence>();
-                    var scoped = await core.SearchAsync("", selectors, DateTimeOffset.UtcNow, false, ct, new RecallAttribution("capture_comparison", job.Id));
-                    var keywordHits = new List<Evidence>();
-                    foreach (var query in candidate.Subject.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(term => term.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase).Take(2))
-                        keywordHits.AddRange(await core.SearchAsync(query, selectors, DateTimeOffset.UtcNow, false, ct, new RecallAttribution("capture_comparison", job.Id)));
-                    foreach (var record in keywordHits.Concat(scoped).DistinctBy(record => (record.Uuid, record.Version)).Take(20)) await LoadAsync(record, related, ct);
-                    if (scoped.Count >= 20 && keywordHits.Count == 0)
+                    var plan = new List<Change>(job.Plan ?? []);
+                    foreach (var extracted in job.Candidates.Skip(job.ComparisonIndex))
                     {
-                        plan.Add(new Change("defer", candidate, null, Guid.NewGuid(), "Scoped comparison exceeds twenty records and keyword alternatives found no safe starting subject."));
-                        job = job with { Plan = plan.ToArray(), ComparisonIndex = job.ComparisonIndex + 1 };
-                        await journal.SaveAsync(job, ct);
-                        continue;
-                    }
-                    var questions = new Dictionary<string, ChoiceQuestion> { ["relation"] = new("Compare this candidate ONLY against the supplied stored Existing records. A correction between messages in this handoff is not a correction of an existing corpus record; classify new if no stored target exists. Compare meaning, applicability and lifecycle. A different scope or future intent is never equivalent to current behavior.", new Dictionary<string, string> { ["equivalent"] = "Same claim, conditions, scope and lifecycle as a stored record", ["correction"] = "Explicit later correction of a supplied stored record", ["conflict"] = "Competing supported claims against a supplied stored record", ["new"] = "No semantic equivalent or conflict in supplied stored records", ["uncertain"] = "Comparison insufficient" }) };
-                    if (CanPromote(candidate, input)) questions.Add("authority_support", new ChoiceQuestion("Do the attributed messages in their conversational context establish this precise claim, scope and lifecycle? Natural answers, preferences, corrections and contextual assent can establish user intent; no special approval phrase is required. Resolve short answers against the preceding question or proposal. Assistant proposals alone cannot establish user intent. Negations, quoted third-party claims, investigation-only approval and document approval do not establish implementation approval. Plans and acceptance do not prove deployment; observed implementation needs concrete attributed observation. If context is missing or ambiguous, choose unsupported. Evaluate meaning, not keywords or speaker confidence.", new Dictionary<string, string> { ["supported"] = "The conversation establishes this exact claim and lifecycle", ["unsupported"] = "The conversation does not establish this claim or lifecycle" }));
-                    var decision = await JudgeAsync(ledger, new { Candidate = candidate, Existing = related.Values.ToArray(), AuthoritySource = input.Messages.SingleOrDefault(message => message.Id == candidate.AuthorityReference), Messages = input.Messages }, questions, ct);
-                    if (decision.TryGetValue("authority_support", out string? supported) && supported != "supported")
-                    {
-                        candidate = Unconfirmed(candidate);
-                        questions.Remove("authority_support");
-                        // Compare again after weakening the claim; a confirmed equivalent is no longer equivalent.
-                        decision = await JudgeAsync(ledger, new { Candidate = candidate, Existing = related.Values.ToArray(), Messages = input.Messages }, questions, ct);
-                    }
-                    string relation = decision["relation"];
-                    Evidence? target = null;
-                    if (relation != "new" && related.Count > 0)
-                    {
-                        var comparison = await GenerateAsync<Comparison>(ledger, DataInstruction + " Identify the exact existing UUID this comparison concerns and explain it. Preserve scope and lifecycle. Use null if no target is justified.", new { Candidate = candidate, Relation = relation, Existing = related.Values.ToArray() }, 256, relation == "uncertain", ct);
-                        target = related.Values.SingleOrDefault(e => e.Uuid == comparison.TargetUuid);
-                        if (target is null && relation != "uncertain" && job.ComparisonRepairAttempts == 0)
+                        comparisonCt.ThrowIfCancellationRequested();
+                        var candidate = extracted;
+                        ValidateCandidate(candidate, input);
+                        if (candidate.Category is "approved_intent" or "observed_implementation" && !CanPromote(candidate, input))
+                            candidate = Unconfirmed(candidate);
+                        if (candidate.Category is not ("approved_intent" or "observed_implementation"))
+                            candidate = candidate with { AuthorityReference = null, AuthorityQuote = null };
+                        var related = new Dictionary<string, Evidence>();
+                        var scoped = await core.SearchAsync("", selectors, DateTimeOffset.UtcNow, false, comparisonCt, new RecallAttribution("capture_comparison", job.Id));
+                        var keywordHits = new List<Evidence>();
+                        foreach (var query in candidate.Subject.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(term => term.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase).Take(2))
+                            keywordHits.AddRange(await core.SearchAsync(query, selectors, DateTimeOffset.UtcNow, false, comparisonCt, new RecallAttribution("capture_comparison", job.Id)));
+                        foreach (var record in keywordHits.Concat(scoped).DistinctBy(record => (record.Uuid, record.Version)).Take(20)) await LoadAsync(record, related, comparisonCt);
+                        if (scoped.Count >= 20 && keywordHits.Count == 0)
                         {
-                            job = job with { ComparisonRepairAttempts = 1 };
-                            await journal.SaveAsync(job, ct);
-                            comparison = await GenerateAsync<Comparison>(ledger, DataInstruction + " Repair a comparison with no valid stored target. TargetUuid must exactly match a supplied Existing UUID for equivalent, correction or conflict. A source-internal correction does not require a corpus target: use relation=new and targetUuid=null when no stored record is actually contradicted. Preserve lifecycle and scope; use uncertain if insufficient.", new { Candidate = candidate, Rejected = comparison, Existing = related.Values.ToArray() }, 768, true, ct);
-                            target = related.Values.SingleOrDefault(e => e.Uuid == comparison.TargetUuid);
-                            if (target is null && comparison.Relation == "new")
-                            {
-                                var check = await JudgeAsync(ledger, new { Candidate = candidate, Existing = related.Values.ToArray(), Review = comparison }, new Dictionary<string, ChoiceQuestion> { ["relation"] = new("Is there an actual supplied stored-record target? Source-internal correction alone is new corpus evidence.", new Dictionary<string, string> { ["new"] = "No matching stored equivalent, correction or conflict", ["uncertain"] = "Stored comparison unresolved" }) }, ct);
-                                relation = check["relation"];
-                            }
+                            plan.Add(new Change("defer", candidate, null, Guid.NewGuid(), "Scoped comparison exceeds twenty records and keyword alternatives found no safe starting subject."));
+                            job = job with { Plan = plan.ToArray(), ComparisonIndex = job.ComparisonIndex + 1 };
+                            await journal.SaveAsync(job, comparisonCt);
+                            continue;
                         }
-                        if (target is null && relation is not ("new" or "uncertain")) throw new KnowledgeException("comparison_target_invalid");
+                        var questions = new Dictionary<string, ChoiceQuestion> { ["relation"] = new("Compare this candidate ONLY against the supplied stored Existing records. A correction between messages in this handoff is not a correction of an existing corpus record; classify new if no stored target exists. Compare meaning, applicability and lifecycle. A different scope or future intent is never equivalent to current behavior.", new Dictionary<string, string> { ["equivalent"] = "Same claim, conditions, scope and lifecycle as a stored record", ["correction"] = "Explicit later correction of a supplied stored record", ["conflict"] = "Competing supported claims against a supplied stored record", ["new"] = "No semantic equivalent or conflict in supplied stored records", ["uncertain"] = "Comparison insufficient" }) };
+                        if (CanPromote(candidate, input)) questions.Add("authority_support", new ChoiceQuestion("Do the attributed messages in their conversational context establish this precise claim, scope and lifecycle? Natural answers, preferences, corrections and contextual assent can establish user intent; no special approval phrase is required. Resolve short answers against the preceding question or proposal. Assistant proposals alone cannot establish user intent. Negations, quoted third-party claims, investigation-only approval and document approval do not establish implementation approval. Plans and acceptance do not prove deployment; observed implementation needs concrete attributed observation. If context is missing or ambiguous, choose unsupported. Evaluate meaning, not keywords or speaker confidence.", new Dictionary<string, string> { ["supported"] = "The conversation establishes this exact claim and lifecycle", ["unsupported"] = "The conversation does not establish this claim or lifecycle" }));
+                        var decision = await JudgeAsync(ledger, new { Candidate = candidate, Existing = related.Values.ToArray(), AuthoritySource = input.Messages.SingleOrDefault(message => message.Id == candidate.AuthorityReference), Messages = input.Messages }, questions, comparisonCt);
+                        if (decision.TryGetValue("authority_support", out string? supported) && supported != "supported")
+                        {
+                            candidate = Unconfirmed(candidate);
+                            questions.Remove("authority_support");
+                            // Compare again after weakening the claim; a confirmed equivalent is no longer equivalent.
+                            decision = await JudgeAsync(ledger, new { Candidate = candidate, Existing = related.Values.ToArray(), Messages = input.Messages }, questions, comparisonCt);
+                        }
+                        string relation = decision["relation"];
+                        Evidence? target = null;
+                        if (relation != "new" && related.Count > 0)
+                        {
+                            var comparison = await GenerateAsync<Comparison>(ledger, DataInstruction + " Identify the exact existing UUID this comparison concerns and explain it. Preserve scope and lifecycle. Use null if no target is justified.", new { Candidate = candidate, Relation = relation, Existing = related.Values.ToArray() }, 256, relation == "uncertain", comparisonCt);
+                            target = related.Values.SingleOrDefault(e => e.Uuid == comparison.TargetUuid);
+                            if (target is null && relation != "uncertain" && job.ComparisonRepairAttempts == 0)
+                            {
+                                job = job with { ComparisonRepairAttempts = 1 };
+                                await journal.SaveAsync(job, comparisonCt);
+                                comparison = await GenerateAsync<Comparison>(ledger, DataInstruction + " Repair a comparison with no valid stored target. TargetUuid must exactly match a supplied Existing UUID for equivalent, correction or conflict. A source-internal correction does not require a corpus target: use relation=new and targetUuid=null when no stored record is actually contradicted. Preserve lifecycle and scope; use uncertain if insufficient.", new { Candidate = candidate, Rejected = comparison, Existing = related.Values.ToArray() }, 768, true, comparisonCt);
+                                target = related.Values.SingleOrDefault(e => e.Uuid == comparison.TargetUuid);
+                                if (target is null && comparison.Relation == "new")
+                                {
+                                    var check = await JudgeAsync(ledger, new { Candidate = candidate, Existing = related.Values.ToArray(), Review = comparison }, new Dictionary<string, ChoiceQuestion> { ["relation"] = new("Is there an actual supplied stored-record target? Source-internal correction alone is new corpus evidence.", new Dictionary<string, string> { ["new"] = "No matching stored equivalent, correction or conflict", ["uncertain"] = "Stored comparison unresolved" }) }, comparisonCt);
+                                    relation = check["relation"];
+                                }
+                            }
+                            if (target is null && relation is not ("new" or "uncertain")) throw new KnowledgeException("comparison_target_invalid");
+                        }
+                        string action = relation switch { "equivalent" => "attach_evidence", "conflict" or "correction" => "preserve_disagreement", "new" => "create", _ => "defer" };
+                        if (target is not null && target.GroupUuid != job.GroupUuid && action == "attach_evidence") action = "create_scoped_link";
+                        if (action == "attach_evidence" && target is not null && candidate.SourceIds.All(source => target.Sources.Any(s => s.Reference == SourceReference(job, source)))) action = "skip";
+                        plan.Add(new Change(action, candidate, target, Guid.NewGuid(), relation));
+                        job = job with { Plan = plan.ToArray(), ComparisonIndex = job.ComparisonIndex + 1 };
+                        await journal.SaveAsync(job, comparisonCt);
                     }
-                    string action = relation switch { "equivalent" => "attach_evidence", "conflict" or "correction" => "preserve_disagreement", "new" => "create", _ => "defer" };
-                    if (target is not null && target.GroupUuid != job.GroupUuid && action == "attach_evidence") action = "create_scoped_link";
-                    if (action == "attach_evidence" && target is not null && candidate.SourceIds.All(source => target.Sources.Any(s => s.Reference == SourceReference(job, source)))) action = "skip";
-                    plan.Add(new Change(action, candidate, target, Guid.NewGuid(), relation));
-                    job = job with { Plan = plan.ToArray(), ComparisonIndex = job.ComparisonIndex + 1 };
-                    await journal.SaveAsync(job, ct);
                 }
             }
+            catch (KnowledgeException error) when (error.Code == "budget_exhausted") { comparisonStop = error.Code; }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { comparisonStop = "deadline_exhausted"; }
             if (input.Preview)
             {
-                job = job with { Status = "processed" };
+                job = job with { Status = comparisonStop is null ? "processed" : "partial", ErrorClass = comparisonStop };
                 await journal.SaveAsync(job, ct);
                 return;
             }
-            foreach (var batch in (job.Plan ?? []).Chunk(100))
+            foreach (var batch in (job.Plan ?? []).Skip(job.CommittedPlanCount).Chunk(100))
             {
                 var writable = batch.Where(c => c.Action is not ("defer" or "skip")).ToArray();
-                if (writable.Length == 0) continue;
+                if (writable.Length == 0)
+                {
+                    job = job with { CommittedPlanCount = job.CommittedPlanCount + batch.Length };
+                    await journal.SaveAsync(job, ct);
+                    continue;
+                }
                 var commit = BuildCommit(job, writable, input);
                 string key = OperationPrefix(job) + $":batch:{CaptureJournal.Hash(KnowledgeJson.Serialize(writable))[..16]}";
-                if (job.Committed.Any(c => c.OperationKey == key)) continue;
+                if (job.Committed.Any(c => c.OperationKey == key))
+                {
+                    job = job with { CommittedPlanCount = job.CommittedPlanCount + batch.Length };
+                    await journal.SaveAsync(job, ct);
+                    continue;
+                }
                 commit = commit with { OperationKey = key };
                 await committer.CommitAsync(commit with { DryRun = true, OperationKey = null }, ct);
-                job = job with { PendingCommit = commit };
+                job = job with { PendingCommit = commit, PendingPlanCount = job.CommittedPlanCount + batch.Length };
                 await journal.SaveAsync(job, ct);
                 var result = await committer.CommitAsync(commit, ct);
-                job = job with { PendingCommit = null, Committed = [.. job.Committed, new CommittedBatch(key, result)] };
+                job = job with { PendingCommit = null, Committed = [.. job.Committed, new CommittedBatch(key, result)], CommittedPlanCount = job.PendingPlanCount, PendingPlanCount = 0, Corpus = await core.StateAsync(ct) };
                 await journal.SaveAsync(job, ct);
             }
             var deferred = job.Deferred.Concat((job.Plan ?? []).Where(c => c.Action == "defer").Select(c => c.Candidate.Subject)).Distinct().ToArray();
-            job = job with { Status = deferred.Length > 0 ? "needs_input" : "processed", Deferred = deferred, Questions = deferred.Select(s => "What evidence establishes the intended meaning or applicability of: " + s + "?").ToArray() };
+            job = job with { Status = comparisonStop is not null ? "partial" : deferred.Length > 0 ? "needs_input" : "processed", ErrorClass = comparisonStop, Deferred = deferred, Questions = deferred.Select(s => "What evidence establishes the intended meaning or applicability of: " + s + "?").ToArray() };
         }
         catch (OperationCanceledException) { job = job with { Status = "partial", ErrorClass = cancellationToken.IsCancellationRequested ? "cancelled" : "deadline_exhausted" }; }
         catch (KnowledgeException error)
         {
             if (error.DetailCode is not null) await ledger.TraceAsync("candidate_validation", error.DetailCode, null);
             job = job with { Status = error.Code is "ambiguous_scope" or "scope_mismatch" ? "needs_input" : "partial", ErrorClass = error.Code, Questions = error.Code is "ambiguous_scope" or "scope_mismatch" ? ["Which consistent project, customer and work reference identifies this learning's intended scope?"] : job.Questions };
-            if (error.Code == "concurrent_corpus_change") job = job with { PendingCommit = null, Plan = null, ComparisonIndex = 0, Deferred = [.. job.Deferred.Where(item => item != CorpusChangedNotice), CorpusChangedNotice] };
+            if (error.Code == "concurrent_corpus_change") job = job with { PendingCommit = null, PendingPlanCount = 0, Plan = (job.Plan ?? []).Take(job.CommittedPlanCount).ToArray(), ComparisonIndex = job.CommittedPlanCount, Deferred = [.. job.Deferred.Where(item => item != CorpusChangedNotice), CorpusChangedNotice] };
         }
         catch (HttpRequestException) { job = job with { Status = "partial", ErrorClass = "dependency_unavailable" }; }
         catch (Exception) { job = job with { Status = "failed", ErrorClass = "processing_failed" }; }
@@ -467,5 +488,5 @@ public sealed class Workflow(ICoreReader core, ICoreCommitter committer, IGenera
         var selectors = request.Selectors;
         if (selectors is not null && (selectors.ScopeDimension is not ("product" or "customer" or "program" or "self") || (selectors.ScopeDimension is "customer" or "program") && string.IsNullOrWhiteSpace(selectors.ScopeIdentifier))) throw new KnowledgeException("invalid_scope");
     }
-    private static CaptureReceipt Receipt(CaptureJob job) => new(job.Id, job.Status, job.Id.ToString(), (job.Plan ?? []).Select(change => change with { Candidate = change.Candidate with { Content = "" }, Target = change.Target is null ? null : change.Target with { Body = "" } }).ToArray(), job.Committed, job.Deferred, job.Questions, job.Budget.Usage with { OutstandingReservations = job.Budget.Reservations.Count }, job.ErrorClass, job.WorkflowVersion, job.Steps, job.Reconciliations?.Select(audit => audit.Summary).ToArray(), DeadlineUtc: job.DeadlineUtc);
+    private static CaptureReceipt Receipt(CaptureJob job) => new(job.Id, job.Status, job.Id.ToString(), (job.Plan ?? []).Select(change => change with { Candidate = change.Candidate with { Content = "" }, Target = change.Target is null ? null : change.Target with { Body = "" } }).ToArray(), job.Committed, job.Deferred, job.Questions, job.Budget.Usage with { OutstandingReservations = job.Budget.Reservations.Count }, job.ErrorClass, job.WorkflowVersion, job.Steps, job.Reconciliations?.Select(audit => audit.Summary).ToArray(), DeadlineUtc: job.DeadlineUtc, RemainingClaims: Math.Max(0, (job.Candidates?.Count ?? 0) - job.ComparisonIndex));
 }

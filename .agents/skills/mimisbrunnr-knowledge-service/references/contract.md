@@ -28,7 +28,7 @@ With `--state` the client derives a stable idempotency key from task ID, payload
 {"idempotencyKey":"task-1/clarification-1","messages":[{"id":"task-1/message-5","role":"user","order":5,"text":"This applies only to synthetic customer Elm."}]}
 ```
 
-Optional `additionalBudget` has `calls`, `inputTokens`, `outputTokens`, `dollars`, `deadlineSeconds`. Continuation is an explicit new allowance; polling or retrying does not renew a budget. `--poll-seconds` accepts 0–60. Transport errors output classified metadata only, never server response bodies or credential-bearing URLs.
+Optional `additionalBudget` has `calls`, `inputTokens`, `outputTokens`, `dollars`, `deadlineSeconds`. Continuation is an explicit new allowance; polling or retrying does not renew a budget. `--poll-seconds` accepts 0Ã¢â‚¬â€œ60. Transport errors output classified metadata only, never server response bodies or credential-bearing URLs.
 
 `reconcile --capture-id UUID` POSTs `/api/knowledge/captures/{id}/reconcile` with the write token after operator review of the receipt's `reconciliationRequired`:
 
@@ -37,3 +37,5 @@ Optional `additionalBudget` has `calls`, `inputTokens`, `outputTokens`, `dollars
 ```
 
 Both epochs must be explicit; the client does not fetch or substitute them. The service archives earlier receipts, plan and pending payload, checks the expected current epoch, and re-compares sanitized evidence against the restored corpus using new generation operation keys. Public `reconciliations` summaries contain prior operation keys, plan/pending hashes, usage, epochs and generation. Existing settled usage and abandoned reservations stay charged. Omitted `additionalBudget` preserves limits and absolute `deadlineUtc`; an explicit allowance may add budget/time. Identical reconciliation retries retain the generation; reusing the key for another payload conflicts. `handoff_purged` means the original sanitized evidence is no longer available and must be supplied in a new handoff.
+
+Capture defaults: 40 provider calls, 100000 input tokens, 12000 output tokens, $2 estimated cost and 120 seconds. Existing receipts keep their persisted allowance. Limits can produce partial incorporation: report committed batches separately from remainingClaims (claims awaiting comparison) and other deferred material. A failed or pending commit is still incomplete even when remainingClaims is zero. Completed comparisons are checkpointed and saved before a bounded pause when persistence time remains; partial is not an all-or-nothing rejection. Polling never resumes or renews allowance. Explicit additionalBudget may grant up to 40 calls per continuation within the existing per-grant cost/token/time maxima.

@@ -15,3 +15,5 @@ Run `dotnet test tests/SmoothAiProductContextMemory.Knowledge.ComponentTest`. Ea
 | 2026-10-03 | Added rejected-preflight continuation after a concurrent direct writer: fresh comparison must select the now-existing target while retaining extracted claims, omitted-tail disclosure and prior spending across journal reopen. |
 
 | 2026-10-24 | Added natural-language/contextual assent and unconfirmed fallback coverage; semantic authority veto is modeled by the independent judge fixture, while exact-quote provenance remains deterministic. |
+
+| 2026-10-24 | Verify 40-call default, unchanged cost/deadline ceilings, durable partial-prefix saving, concurrent-revision continuation without duplicate writes, preview isolation, deadline commit reserve, and exact replay after a lost partial-commit response. |

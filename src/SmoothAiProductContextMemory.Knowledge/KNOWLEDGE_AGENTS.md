@@ -10,7 +10,7 @@ Evidence attachment creates a new immutable core version, retaining existing cla
 
 Python `redact.py` is packaged verbatim from the direct skill. Pass content through stdin, enforce process timeout, discard stderr, and fail closed. Sanitize ingress, retrieved evidence and generated outputs before persistence or provider dispatch.
 
-Package the canonical direct-mode `atomicity.py` too. Apply the same detector before and after any bounded extraction repair. Shared fixtures must keep necessary conditions and exceptions together while rejecting genuinely independent bundled claims. Persist all returned claims and comparison progress; commit a bounded plan atomically after comparison, with explicit unexamined material and continuation allowances.
+Package the canonical direct-mode `atomicity.py` too. Apply the same detector before and after any bounded extraction repair. Shared fixtures must keep necessary conditions and exceptions together while rejecting genuinely independent bundled claims. Persist all returned claims and comparison progress; commit each completed bounded comparison prefix atomically before a limit pauses further comparisons, with explicit unexamined material and continuation allowances.
 
 | Date | Change |
 |---|---|
@@ -19,3 +19,5 @@ Package the canonical direct-mode `atomicity.py` too. Apply the same detector be
 | 2026-10-24 | Natural-language authority is assessed against the full attributed conversation, without approval phrase matching. Missing or unsupported authority retains an explicitly unconfirmed proposed claim and re-compares it; it does not abort unrelated learning. Exact full-message provenance remains required for promotion. |
 
 Ordinary facts, explanations, preferences and attributed findings use reported_fact and require no authority fields. Fully examined messages with no reusable knowledge use noLearningSourceIds so an empty extraction can complete without writes or questions. The service owns novelty comparison; callers send context at meaningful checkpoints, not preclassified records.
+
+| 2026-10-24 | Capture defaults to 40 provider calls with the existing $2/120-second ceilings. Budget/deadline pauses commit completed comparisons, persist committed/pending plan checkpoints, and expose remainingClaims. Comparison reserves ten seconds for persistence; previews never write. Continuations preserve spent allowance and never renew it automatically. Re-read corpus revision on resume while retaining the committed prefix. |
