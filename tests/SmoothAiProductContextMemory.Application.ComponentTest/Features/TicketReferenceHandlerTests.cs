@@ -230,8 +230,9 @@ public sealed class TicketReferenceHandlerTests(AspireFixture aspire) : HandlerT
         Guid uuid = (await NewSetHandler().Handle(Write(target.Uuid, "Reference subject", "Claim"), Ct))
             .Items[0].Uuid.ShouldNotBeNull();
         string ownKey = Key("OWN");
+        // The write handler refreshes tracked state; the earlier arrangement is now detached.
+        target = await Db.MemoryGroups.SingleAsync(group => group.Uuid == target.Uuid, Ct);
         target.Tickets = [TicketDocument.Create(Provider, ownKey, string.Empty)];
-        Db.MemoryGroups.Update(target);
         await Db.SaveChangesAsync(Ct);
 
         // One valid reference plus one the memory's own group owns: the whole batch is refused, so the
