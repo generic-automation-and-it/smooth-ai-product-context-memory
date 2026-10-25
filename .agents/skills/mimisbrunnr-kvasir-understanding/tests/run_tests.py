@@ -2875,7 +2875,7 @@ class UnderstandingFileTests(unittest.TestCase):
             self.assertIn("Retries share one budget", out)
             self.assertNotIn("Old answer that was superseded.", out)
             self.assertIn("1 older version(s) of a slug passed over", out)
-            self.assertIn("npgsql-20260920-1400/npgsql-enum.understanding.md", out)
+            self.assertIn(str(Path("npgsql-20260920-1400") / "npgsql-enum.understanding.md"), out)
 
     def test_contested_and_repo_specific_units_are_flagged(self):
         with tempfile.TemporaryDirectory() as tmp:
