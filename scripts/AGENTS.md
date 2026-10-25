@@ -80,7 +80,12 @@ Operational checks support operator decisions; a preflight must never repair the
   recursively because an operator running the installed scripts directly leaves one at any depth.
   **The list is two names and must stay two**: `agents/`, `references/` and `assets/` are
   runtime-referenced — odin reads `references/read-path.md` mid-skill, ai-understanding renders
-  `assets/UNDERSTANDING.template.md` — so widening it ships a skill documenting a file it cannot open.
+  `assets/UNDERSTANDING.template.md` and kvasir loads its refusal and receipt messages from
+  `assets/*.md` — so widening it ships a skill documenting a file it cannot open. The shared folder's
+  own `scripts/assets/` needs no entry either: it sits inside `_mimisbrunnr-shared`, which refreshes
+  whole. The harness asserts
+  a `kvasir/assets` file survives an install, because a message the client loads is a runtime file in
+  the same sense a template is.
   This is a runtime rule, not a security boundary: nothing in a skill reads its own tests. It runs
   **after** the shared-folder sweep, never before, because the sweep compares destination against source
   and needs the same files on both sides. The clone source is never pruned, which is what leaves the
@@ -196,6 +201,8 @@ The ignore-refusal coverage is **three** cases, because `check-ignore` gives two
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-24 | `_mimisbrunnr-shared/scripts/assets/` ships with the shared folder, which the installer refreshes whole and the packer excludes only `tests/`/`__pycache__` from — no prune-list change, recorded so a future "assets are per-skill only" reading does not delete it | this PR |
+| 2026-10-24 | The installer harness's "an installed skill keeps its runtime files" case now also asserts a `mimisbrunnr-kvasir-understanding/assets/*.md` file survives an install, so the prune list stays proven against a *script-loaded* asset and not only a template | this PR |
 | 2026-10-22 | **Client settings moved from `~/.mimisbrunnr/credentials` to environment variables (APPHOST LADR-007).** `run.sh` adds missing `CONTEXT_MEMORY_*` settings to an add-only shell-profile block and `run.ps1` to the Windows User scope; an existing base URL and tokens are the master (port and controller pair follow them); the credential file holds the write token alone; the read-only file is retired. Fixed in passing: `run.ps1` failed on every run without `-DataRoot` (`[string]` binds an omitted parameter as `""`, so `$null -ne $DataRoot` was always true and `Split-Path ""` threw, masked by the trap). Harness 110 → 108 cases, rewritten around `env -i`; GNU/Linux run 104 + 4 root skips. | LADR-007 |
 | 2026-10-19 | `-g` global install in both ports (own store; Claude/Codex/OpenCode; rules/hooks machinery, empty owned lists); harness 101 cases; `SKILLS_TEST_SKIP_PS1` was inverted; ps1 empty manifest read as first install | — |
 | 2026-10-16 | **`pr-gate.yml`'s `paths:` filter joined the owned-set parity cases.** It is the fourth statement of the installer's owned set and the only one that decides *whether the gate runs* — and nothing held it, which is how `ai-memory-context` reached the gate's step list and its own harness while a PR touching only that folder started no workflow and reported nothing. GitHub evaluates `paths:` before a runner exists, so unlike the three derived copies it cannot be computed and is instead asserted: `test_the_gate_triggers_on_every_owned_skill` derives the owned set from the installer's own `is_owned_skill`, requires a filter entry to reach every one of them, and requires the `push:` and `pull_request:` blocks to agree. The prefixed skills became one `mimisbrunnr-*/**` glob — seven lines per block collapsed to one, the same form `agile-github-*` already used — so the next prefixed skill is covered by the shape of the filter; the case proves that with a name that does not exist yet. 27 → 28 cases, all three drift shapes mutation-checked (drop an owned skill, drop the glob, diverge the two blocks). **The case caught a bug in itself on first run:** `partition` returns the head, and the lists sit *after* their keys, so the first version read an empty filter from both blocks. Two stale counts in this file were corrected in the same pass (installer 50 → 53, self-containment 22 → 28). | PR #278 review `10.` |

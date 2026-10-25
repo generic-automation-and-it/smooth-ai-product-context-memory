@@ -4635,7 +4635,7 @@ class SessionExportGuidanceTests(unittest.TestCase):
             dumped = (Path(folder) / "_session.md").read_text(encoding="utf-8")
             for claim in claims:
                 self.assertIn(claim, dumped)
-            self.assertNotIn(self._norm(uc.SESSION_TEMPLATE), self._norm(dumped))
+            self.assertNotIn(self._norm(uc.session_template()), self._norm(dumped))
             binding = json.loads((Path(folder) / uc.METADATA_FILE).read_text(encoding="utf-8"))["binding"]
             self.assertEqual(binding["tickets"], ["github:123"])
             self.assertEqual(binding["repository"], "owner/repo")
@@ -5490,6 +5490,217 @@ class GateIdentityTests(unittest.TestCase):
             else:
                 os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
         self.assertNotIn("durable identity", note)
+
+
+class SkillAssetTests(unittest.TestCase):
+    """The skill's own `assets/`: one message per file, loaded explicitly, fail closed.
+
+    The point of the move is that a user-facing message has one home a human can read and edit
+    without touching control flow. These cases hold the parts that make that safe: the bytes did not
+    change, a broken install refuses instead of printing a half-filled message, and the folder stays
+    local to the skill (a peer skill's or a shared folder's assets would break the zip).
+    """
+
+    # Each asset's exact text before the move, taken from the literals it replaced. A wording change
+    # is a deliberate edit in both places; a silent one fails here. Only messages passing the
+    # convention's bar live here: at least three printed lines, or one line used at two or more
+    # call sites. One-line one-offs stay inline beside the logic that decides them.
+    MOVED = [
+        ("import-deprecated-store.md", {}, (
+            "DEPRECATED: `import <input> --store` prepared a capture payload. That direction is "
+            "now `export`; `import` reads the store INTO the session. Nothing was written.\n"
+            "  to review:  understanding_client.py export <input> --dryrun\n"
+            "  to capture: understanding_client.py export <input>")),
+        ("import-deprecated-heimdallr.md", {}, (
+            "DEPRECATED: `--heimdallr` autofill was never an inbound step; `import` binds only "
+            "what the caller passes, so a session on a ticketed branch recalls the whole "
+            "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
+            "  to review:  understanding_client.py export <input> --dryrun\n"
+            "  to capture: understanding_client.py export <input>\n"
+            "  to dump:    understanding_client.py dump --currentsession --from "
+            "<session-summary-file|->")),
+        ("gate-redactor-refusal.md", {}, (
+            "REFUSED: the decision gate's redactor could not run, so record content would have been "
+            "sent unscrubbed. Nothing was written.")),
+        ("gate-misconfigured-refusal.md", {"detail": "bad-decisions-config"}, (
+            "REFUSED: the decision gate is misconfigured (bad-decisions-config). "
+            "Nothing was written.")),
+        ("gate-missing-probe.md", {"gate": "G"}, (
+            "NOTE: the decision gate is enabled but G is missing; a write would skip it.")),
+        ("gate-missing-export.md", {"gate": "G"}, (
+            "NOTE: the decision gate is enabled but G is missing; the gate was skipped and the "
+            "export continued.")),
+        ("gate-timeout-note.md", {"seconds": 30}, (
+            "NOTE: the decision gate did not answer within 30s; the gate was skipped and the export "
+            "continued.")),
+        ("gate-failed-note.md", {"detail": "D"}, (
+            "NOTE: the decision gate failed (D); the gate was skipped and the export continued.")),
+        ("gate-unreadable-output-note.md", {}, (
+            "NOTE: the decision gate returned unreadable output; the gate was skipped and the export "
+            "continued.")),
+        ("gate-unrecognised-report-note.md", {}, (
+            "NOTE: the decision gate returned an unrecognised report shape; the gate was skipped and "
+            "the export continued.")),
+        ("gate-bad-below-threshold-note.md", {"below": "None"}, (
+            "NOTE: the decision gate reported no usable belowThreshold (None); the gate was skipped "
+            "and the export continued.")),
+        ("gate-bad-records-note.md", {"outcome": "'ok'"}, (
+            "NOTE: the decision gate returned no usable 'records' list ('ok'); the gate was skipped "
+            "and the export continued.")),
+        ("gate-refused-export.md", {}, (
+            "REFUSED: the decision gate refused this export (the reason is above). Nothing was "
+            "written; fix the gate or export without it.")),
+        ("gate-held-count.md", {"count": 2, "queue": "/q"}, (
+            "  2 also held by the decision gate (below threshold) -> /q")),
+        ("ledger-restarted.md", {}, (
+            "decisions: attempt ledger was unreadable and restarted empty; every record's attempt "
+            "budget restarts")),
+        ("ledger-evicted.md", {"count": 2, "noun": "entries"}, (
+            "decisions: attempt ledger evicted 2 entries past its cap; those records' attempt "
+            "budgets restart")),
+        ("ledger-index-purged.md", {"count": 2, "noun": "entries"}, (
+            "decisions: attempt ledger dropped 2 positional index entries left by a prior bug; "
+            "those positions are scorable again")),
+        ("session-marker-note.md", {"error": "E"}, (
+            "NOTE: session marker not written (E).")),
+        ("initiative-create-hint.md", {"initiative": "core", "write_client": "WRITE"}, (
+            "Create it first, then re-run:\n"
+            "  echo '{\"name\": \"core\", \"status\": \"active\"}' | python3 -B WRITE "
+            "upsert-initiative")),
+        ("export-preview-dry-run.md", {"total": 4, "group": ", group (dry-run)"}, (
+            "DRY RUN — nothing was written, and nothing was created.\n"
+            "  would write: memory (4), group (dry-run)\n"
+            "  would not create: anything under an existing group, because no group was resolved\n"
+            "The server-side `set --dryrun` veto runs at the start of a write, once a group exists. "
+            "Re-run without `--dryrun` to capture.")),
+        ("persist-proposed-frame.md", {"count": 2, "output": "OUT"}, (
+            "\nPROPOSED (2 held -> store as Status=proposed):\nOUT")),
+        ("veto-dryrun-frame.md", {"tag": " T", "output": "OUT"}, (
+            "\nset --dryrun (the veto point) T:\nOUT")),
+        ("wrote-frame.md", {"tag": "", "output": "OUT"}, (
+            "\nWROTE:\nOUT")),
+    ]
+
+    def test_every_moved_message_is_byte_identical_to_what_it_replaced(self):
+        """The no-behaviour-change half of the move: same bytes, same trailing newline count."""
+        for name, values, expected in self.MOVED:
+            with self.subTest(asset=name):
+                self.assertEqual(expected, uc.render_asset(name, **values))
+
+    def test_the_assets_are_the_skills_own_and_are_never_shared(self):
+        """A shared folder cannot carry prose a caller loads, and a zip has to carry its own copy."""
+        skill = Path(uc.__file__).resolve().parents[1]
+        self.assertEqual(skill / "assets", uc._SKILL_ASSETS)
+        self.assertNotIn("_mimisbrunnr-shared", str(uc._SKILL_ASSETS))
+
+    def test_no_asset_is_a_txt_file(self):
+        """R4: prose is `.md` (frontmatter, highlighting) and structured data is `.json`. No `.txt`."""
+        stray = sorted(p.name for p in uc._SKILL_ASSETS.rglob("*") if p.suffix == ".txt")
+        self.assertEqual([], stray)
+
+    def test_every_asset_is_loaded_and_every_load_names_an_asset(self):
+        """Both directions: an orphan file is dead weight, a dangling name is a refusal at runtime."""
+        loaded = set()
+        for script in sorted((uc._SKILL_ASSETS.parent / "scripts").glob("*.py")):
+            loaded.update(re.findall(r'(?:read|render)_asset\(\s*"([^"]+)"', script.read_text("utf-8")))
+        on_disk = {p.name for p in uc._SKILL_ASSETS.iterdir() if p.is_file()}
+        self.assertEqual(set(), on_disk - loaded, "asset on disk that no script loads")
+        self.assertEqual(set(), loaded - on_disk, "script names an asset that is not on disk")
+
+    def test_a_missing_or_unreadable_asset_is_a_named_refusal(self):
+        """Fail closed, and name the file: a fallback to an inline copy is the drift this prevents."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                with self.assertRaises(uc.AssetUnavailable) as missing:
+                    uc.read_asset("nope.md")
+                self.assertEqual("asset-missing: nope.md", str(missing.exception))
+                (Path(tmp) / "a-directory.md").mkdir()
+                with self.assertRaises(uc.AssetUnavailable) as unreadable:
+                    uc.read_asset("a-directory.md")
+                self.assertEqual("asset-unreadable: a-directory.md", str(unreadable.exception))
+                # Bytes that are not UTF-8 raise UnicodeDecodeError — a ValueError, not an OSError —
+                # so it escaped this loader and main as a traceback echoing byte offsets until this
+                # case existed. A corrupt asset is the broken-install path this guard exists for.
+                (Path(tmp) / "not-utf8.md").write_bytes(b"REFUSED: \xff\xfe not utf-8")
+                with self.assertRaises(uc.AssetUnavailable) as undecodable:
+                    uc.read_asset("not-utf8.md")
+                self.assertEqual("asset-unreadable: not-utf8.md", str(undecodable.exception))
+
+    def test_an_empty_asset_is_a_refusal_not_an_empty_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "empty.md").write_text("\n", encoding="utf-8")
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                with self.assertRaises(uc.AssetUnavailable) as error:
+                    uc.read_asset("empty.md")
+        self.assertEqual("asset-empty: empty.md", str(error.exception))
+
+    def test_an_unfilled_placeholder_is_a_refusal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "half.md").write_text("count {{total}}\n", encoding="utf-8")
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                with self.assertRaises(uc.AssetUnavailable) as error:
+                    uc.render_asset("half.md")
+        self.assertIn("asset-placeholder-unfilled: half.md ({{total}})", str(error.exception))
+
+    def test_the_dump_template_is_loaded_and_keeps_its_written_newline(self):
+        """R4 names templates, and a 10-line one is prose, not code.
+
+        `dump` writes this as a file, so the final newline is payload: the loader strips a file's own
+        trailing newline and `session_template()` restores it. A module-level read would have made a
+        missing asset an `ImportError` before `main` could refuse, hence the function.
+        """
+        expected = (
+            "## Understandings\n"
+            "\n"
+            "_(One entry per Understanding, each with: question, answer, why, boundaries, provenance. "
+            "State\n"
+            "behaviour, contracts and invariants, not file paths or line numbers, which rot. Never a "
+            "credential\n"
+            "value and no personal data (names, emails, user IDs); the dump redacts what it "
+            "recognises, but that is\n"
+            "the second net, not the first.)_\n"
+            "\n"
+            "## Decisions\n"
+            "\n"
+            "## Open questions\n"
+        )
+        self.assertEqual(expected, uc.session_template())
+
+    def test_a_value_containing_a_placeholder_is_inserted_verbatim(self):
+        """Single-pass substitution: a value is never re-scanned, matching the replaced f-strings.
+
+        A record whose scope literally reads `{{scope}}`, re-exported under `--scope x:y`, printed
+        `scoped {{scope}}` before the move. A chained `.replace` could not tell that value apart
+        from a real placeholder: it either refused blaming the install (a value holding an unknown
+        `{{…}}`) or filled both occurrences and printed `scoped x:y` — a false claim about what the
+        records carry, reading as a whole message.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "mix.md").write_text("scoped {{labels}}, binds {{scope}}\n",
+                                              encoding="utf-8")
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                rendered = uc.render_asset("mix.md", labels="{{scope}}", scope="x:y")
+                unknown = uc.render_asset("mix.md", labels="{{unknown}}", scope="x:y")
+        self.assertEqual("scoped {{scope}}, binds x:y", rendered)
+        self.assertEqual("scoped {{unknown}}, binds x:y", unknown)
+
+    def test_a_dollar_in_the_prose_is_not_template_syntax(self):
+        """`string.Template` would raise on `$HOME`, and the write path's docs quote that shape."""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "prose.md").write_text("Set $HOME/x and {{value}}.\n", encoding="utf-8")
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)):
+                rendered = uc.render_asset("prose.md", value="3")
+        self.assertEqual("Set $HOME/x and 3.", rendered)
+
+    def test_a_missing_asset_stops_the_client_with_a_refusal(self):
+        """End to end, not just the helper: the caller sees a refusal and exit 1, never silence."""
+        with tempfile.TemporaryDirectory() as tmp:
+            err = io.StringIO()
+            with mock.patch.object(uc, "_SKILL_ASSETS", Path(tmp)), redirect_stderr(err):
+                rc = uc.main(["import", "--store"])
+        self.assertEqual(1, rc)
+        self.assertIn("REFUSED: asset-missing: import-deprecated-store.md. Nothing was written.",
+                      err.getvalue())
 
 
 if __name__ == "__main__":

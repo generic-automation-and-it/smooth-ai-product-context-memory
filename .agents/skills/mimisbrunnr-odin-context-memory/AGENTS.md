@@ -13,6 +13,19 @@ Read [`SKILL.md`](./SKILL.md) first — the five-stage write pipeline, modes, sw
   memory elsewhere is seen; only a match inside the request's `groupUuid` may be bumped, and a cross-group
   match becomes a new memory plus a typed link. Don't widen the version-target lookup to "fix" an
   unqualified "deduplication is cross-group" wording — it reintroduces cross-group lock ordering.
+- **A local `assets/` is allowed here like in any skill; none exists because nothing passes the
+  threshold, not because the convention excludes this skill.** The loaded-strings rule (skills root
+  `AGENTS.md`) applies to odin exactly as written: a message moves into this skill's own `assets/`
+  when it is at least three printed lines or used at two call sites, loaded by name through the standard
+  fail-closed loader. Today `scripts/authority.py` and `scripts/divergence.py` raise one-line
+  `ValueError`s, each at one site, so every one stays beside the check that decides it; `SKILL.md` and
+  `references/*.md` are prose the **agent** reads, not a string a script loads, so they are not assets
+  either; and the rubric and conflict menus are shared-script data in `_mimisbrunnr-shared/scripts/`,
+  which a shared script reads from its own folder, never from a caller's. When a message here passes
+  the threshold, create `assets/` and load it the standard way. **If a message ever becomes needed by
+  this skill and another, the WET rule applies:** copy the bytes into each skill's own `assets/` and
+  pin them byte-equal with a parity test — never a shared assets folder, never a cross-skill read.
+  WET duplicates prose two skills *both load*; it does not give every skill the same files.
 - **Env vars and who receives them.** `context_memory_read_client.py` reads only `CONTEXT_MEMORY_READ_TOKEN`
   and refuses to start if any write-token spelling is set. `context_memory_client.py` reads
   `CONTEXT_MEMORY_WRITE_TOKEN` for write routes only, loaded inside a subshell around each write-route
@@ -71,6 +84,7 @@ Read [`SKILL.md`](./SKILL.md) first — the five-stage write pipeline, modes, sw
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-24 | Checked against the loaded-strings convention and **gained no `assets/`** — but the Non-Negotiable now states plainly that a local `assets/` is *allowed* here like in any skill: none exists because nothing passes the extraction threshold, not because the convention excludes this skill. `references/*.md` is agent-read prose rather than a string a script loads, and the rubric/menus are shared-script data read from the shared folder's own directory. **WET scope recorded too:** WET duplicates prose two skills *both load* — copy the bytes into each skill's own `assets/` and pin them byte-equal; it does not give every skill the same files, and no shared assets folder exists to copy from. | this PR |
 | 2026-10-22 | **The gate reads decision settings from the environment only (APPHOST LADR-007).** `CredentialLoadingTests` (four cases pinning "the gate reads the file") became `EnvironmentOnlySettingsTests` (a file never enables the gate, never supplies model/endpoint, the environment supplies every setting, importing the gate adds nothing to `os.environ`); the review-#4 case now asserts the file cannot enable the gate set or unset. Mutation-checked against the old gate: 4 fail. SKILL.md and `write-path.md` say where each setting lives; the documented write step is unchanged. 180 → 179 cases. | LADR-007 |
 | 2026-10-17 | `--product-name` now declares BOTH `(Product)-[:HAS_INITIATIVE]->(Initiative)` AND `(Product)-[:HAS_REPO]->(Repo)` when both anchors are bound; either alone attributes the memory (LADR-10), a repo conflict (`409`) is a NOTE, not a silent skip, and does not fail an export whose primary anchor already landed. The "initiative wins" heuristic is gone | — |
 | 2026-10-16 | **The value-gate contract now states the subject-less case.** The ledger key is the subject *and its group*, and the group half was documented — but a record carrying no `subject`/`description`/`name` is keyed by **position within the batch**, scored as a first attempt every call, and never written to disk. That is exactly what `ai-memory-context`/`mimisbrunnr-kvasir-understanding` did: the gate ran, reported a healthy verdict count, and the three-attempt bound was dead code. The symptom is one flag (`durable: false`) and an absent file. Documentation only. | PR #278 |

@@ -74,6 +74,24 @@ class ParityTests(unittest.TestCase):
             "ai-understanding decisions_rubric.json differs from the Mímisbrunnr rubric; "
             "re-copy it, or record the divergence deliberately")
 
+    def test_every_asset_shipped_with_the_gate_is_byte_identical(self):
+        """The gate now loads prose from `scripts/assets/`; a WET copy of the script is not a copy of
+        the gate unless its messages travel with it. Same failure class as the rubric, so held the
+        same way — and the file set is compared, not just the bytes of files both sides happen to
+        have, so an asset added on one side is a failure rather than an untested file."""
+        copy_dir = COPY.ASSETS
+        orig_dir = ORIG.ASSETS
+        self.assertEqual(
+            sorted(p.name for p in orig_dir.iterdir() if p.is_file()),
+            sorted(p.name for p in copy_dir.iterdir() if p.is_file()),
+            "the gate assets exist on one side only; re-copy the folder from the shared original")
+        for name in sorted(p.name for p in orig_dir.iterdir() if p.is_file()):
+            with self.subTest(asset=name):
+                self.assertEqual(
+                    (copy_dir / name).read_bytes(), (orig_dir / name).read_bytes(),
+                    f"ai-understanding scripts/assets/{name} differs from the shared original; "
+                    "re-copy it")
+
     def test_defaults_identical(self):
         for name in DEFAULTS:
             self.assertEqual(constant(COPY, name), constant(ORIG, name),
