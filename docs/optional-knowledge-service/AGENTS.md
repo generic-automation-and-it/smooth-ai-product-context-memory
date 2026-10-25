@@ -20,4 +20,5 @@ This pack describes an authorized optional service sharing Mimi's corpus; accept
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-10-25 | Documented project/global agent instructions for proactive caller use, a copyable minimal snippet, privacy boundaries and receipt-based setup checks | OPERATIONS.md, README.md |
 | 2026-10-03 | Carried agreed planning pack into feature branch; added execution ledger and provider smoke evidence | KS-01–KS-15 |

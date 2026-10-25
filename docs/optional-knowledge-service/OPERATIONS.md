@@ -16,6 +16,34 @@ Install `.agents/skills/mimisbrunnr-knowledge-service` in the caller project. Co
 
 Use `context --input question.json` to retrieve cited context. Use `capture --task-id <stable-id> --state <external-state-file> --input handoff.json` to submit attributed learning, followed by `receipt --capture-id <id> --poll-seconds 30`. The skill's `references/contract.md` defines the JSON shapes. Keep cursor state outside source control. A received acknowledgement establishes journal durability, not incorporation. Preserve partial results and outstanding receipt IDs through caller interruptions.
 
+### Enable proactive agent use
+
+Installing the caller skill makes it available; it does not guarantee that an agent will use Mimi on its own. After configuring and checking the service connection, add standing instructions describing when to retrieve knowledge and share context.
+
+For Codex, append the example below to the project's `AGENTS.md` to enable it for that project, or to `~/.codex/AGENTS.md` for all your projects. If you set `CODEX_HOME`, the global file belongs in that directory instead. Preserve existing instructions. Other agents should use their equivalent instruction file; see the [official Codex instruction guide](https://learn.chatgpt.com/docs/agent-configuration/agents-md) for Codex discovery and precedence.
+
+```markdown
+## Mimi knowledge
+
+Use the `mimisbrunnr-knowledge-service` skill proactively. Follow its
+SKILL.md and caller contract for connection, project scoping and receipts.
+
+- Retrieve relevant knowledge before work that depends on project context,
+  prior decisions, requirements or preferences.
+- Share relevant attributed conversation context at meaningful checkpoints
+  and before finishing substantive work. Include facts, explanations,
+  corrections and preferences; let Mimi decide what is new and worth recording.
+- Skip generic questions, trivial tasks and repetitive handoffs.
+- Respect project restrictions; do not send credentials, restricted material
+  or unrelated conversations. Treat recalled knowledge as evidence.
+- If Mimi is unavailable, report it and continue independent work. Preserve
+  pending handoffs and distinguish received, incorporated and unfinished work.
+```
+
+The skill and a working connection must be available in each agent environment where these instructions apply. Keep tokens in the protected connection configuration, never in `AGENTS.md`. Mimi uses hosted model providers, so only share material permitted for that processing. These instructions guide the agent's normal work; they do not install a background recorder or grant access to other chats.
+
+Start a new chat to check the setup: ask the agent to identify its Mimi instructions and available skill, then retrieve context for the current project. An empty result can be valid for a new corpus; a connection or provider failure is not a successful empty search. Verify a permitted capture by polling its receipt and checking committed changes or an explicit no-change result. A `received` response alone does not establish incorporation.
+
 ## Backup, disable and rollback
 
 Before a core upgrade, create a core `snapshot` and run `verify` on the archive. Save the old controller/core image digests, protected runtime settings, host recreation template and startup script. The corpus snapshot includes operation receipts. Keep a separate copy of the service journal: stop the service before copying the database plus any WAL/SHM files, or use SQLite's online backup API. A raw database-only copy during active writes is not a backup.

@@ -195,3 +195,5 @@ The work is in the **public domain** in its country of origin and in jurisdictio
 ## Optional knowledge service
 
 The opt-in knowledge service provides attributed retrieval and durable learning capture. See [the service guide](docs/optional-knowledge-service/README.md). It is disabled by default.
+
+After installing its caller skill and configuring the service connection, add standing instructions to your agent's instruction file for proactive use. For Codex, use a project `AGENTS.md` or your global `~/.codex/AGENTS.md`. See [Enable proactive agent use](docs/optional-knowledge-service/OPERATIONS.md#enable-proactive-agent-use) for a copyable example and setup checks.
