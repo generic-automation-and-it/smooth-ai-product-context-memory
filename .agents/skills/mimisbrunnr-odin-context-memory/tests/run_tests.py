@@ -2188,11 +2188,17 @@ class DeepSearchTests(unittest.TestCase):
         def request(method, path, body, **kwargs):
             calls.append((path, body))
             return {"items": []}
-        deepsearch.execute({"baseline": {}, "keywords": ["refund", "export"]}, request=request)
+        payload = {"baseline": {}, "keywords": ["refund", "export"]}
+        deepsearch.execute(payload, request=request)
         query_bodies = [body for path, body in calls if path == "/api/context/query"]
         self.assertEqual(len(query_bodies), 3)
         self.assertEqual(len({body["callerRequestId"] for body in query_bodies}), 1)
         self.assertTrue(all(body["recallPurpose"] == "direct_retrieval" for body in query_bodies))
+        first_id = query_bodies[0]["callerRequestId"]
+        self.assertEqual(payload["baseline"], {})
+        calls.clear()
+        deepsearch.execute(payload, request=request)
+        self.assertNotEqual(calls[0][1]["callerRequestId"], first_id)
         calls.clear()
         deepsearch.execute({"baseline": {"recallPurpose": "capture_comparison", "callerRequestId": GOOD_UUID}, "keywords": ["refund"]}, request=request)
         self.assertTrue(all(body["recallPurpose"] == "capture_comparison" and body["callerRequestId"] == GOOD_UUID for path, body in calls if path == "/api/context/query"))

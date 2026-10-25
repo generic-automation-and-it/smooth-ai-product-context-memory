@@ -56,11 +56,31 @@ public sealed class CoreCommitter(HttpClient client) : ICoreCommitter
         request.GroupUuid,
         Items = request.Items.Select(item => new
         {
-            item.Uuid, item.Name, item.Description, item.Statement, item.ContentSummary, item.Kind, item.Facets, item.Tags, item.Status, item.Confidence, item.Content,
+            item.Uuid,
+            item.Name,
+            item.Description,
+            item.Statement,
+            item.ContentSummary,
+            item.Kind,
+            item.Facets,
+            item.Tags,
+            item.Status,
+            item.Confidence,
+            item.Content,
             Sources = item.Sources.Select(source => new { source.Kind, source.Reference, source.CapturedAt, source.Evidence }),
-            item.ValidFrom, item.ValidUntil, item.SummaryModel, item.SummaryPromptVersion, item.CreateUuid, item.ExpectedVersion
+            item.ValidFrom,
+            item.ValidUntil,
+            item.SummaryModel,
+            item.SummaryPromptVersion,
+            item.CreateUuid,
+            item.ExpectedVersion
         }),
-        request.Links, request.LabelsProposed, request.DryRun, request.OperationKey, request.ExpectedCorpusEpoch, request.ExpectedCorpusRevision
+        request.Links,
+        request.LabelsProposed,
+        request.DryRun,
+        request.OperationKey,
+        request.ExpectedCorpusEpoch,
+        request.ExpectedCorpusRevision
     }, ct);
     private async Task<T> PostAsync<T>(string path, object data, CancellationToken ct)
     {

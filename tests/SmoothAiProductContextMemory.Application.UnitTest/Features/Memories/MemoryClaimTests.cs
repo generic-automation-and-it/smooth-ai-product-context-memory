@@ -14,28 +14,43 @@ public class MemoryClaimTests
     public void Evidence_only_change_is_a_new_claim()
     {
         var prior = Write() with { Sources = [new SourceInput("message", "message:1", null)] };
-        var updated = prior with { Sources = [new SourceInput("message", "message:1", null,
-            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:2" })] };
+        var updated = prior with
+        {
+            Sources = [new SourceInput("message", "message:1", null,
+            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:2" })]
+        };
         Same(prior, updated).ShouldBeFalse();
     }
 
     [Fact]
     public void Equivalent_evidence_instances_do_not_create_another_version()
     {
-        var left = Write() with { Sources = [new SourceInput("message", "message:1", null,
-            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:2" })] };
-        var right = left with { Sources = [new SourceInput("message", "message:1", null,
-            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:2" })] };
+        var left = Write() with
+        {
+            Sources = [new SourceInput("message", "message:1", null,
+            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:2" })]
+        };
+        var right = left with
+        {
+            Sources = [new SourceInput("message", "message:1", null,
+            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:2" })]
+        };
         Same(left, right).ShouldBeTrue();
     }
 
     [Fact]
     public void Changed_evidence_authority_is_a_new_claim()
     {
-        var left = Write() with { Sources = [new SourceInput("message", "message:1", null,
-            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:2" })] };
-        var right = left with { Sources = [new SourceInput("message", "message:1", null,
-            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:3" })] };
+        var left = Write() with
+        {
+            Sources = [new SourceInput("message", "message:1", null,
+            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:2" })]
+        };
+        var right = left with
+        {
+            Sources = [new SourceInput("message", "message:1", null,
+            new EvidenceDocument { Category = "approved_intent", AuthorityReference = "message:3" })]
+        };
         Same(left, right).ShouldBeFalse();
     }
 

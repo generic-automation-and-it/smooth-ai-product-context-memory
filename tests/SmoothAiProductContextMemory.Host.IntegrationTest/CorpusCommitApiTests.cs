@@ -36,8 +36,13 @@ public sealed class CorpusCommitApiTests(HostWebAppFixture fixture) : IClassFixt
         JsonElement state = await client.GetFromJsonAsync<JsonElement>("/api/context/corpus-state", Ct);
         string key = "http-group-" + Guid.NewGuid().ToString("N");
         string repo = "synthetic/core-api/" + key;
-        var request = new { repo, operationKey = key, expectedCorpusEpoch = state.GetProperty("epoch").GetGuid(),
-            expectedCorpusRevision = state.GetProperty("revision").GetInt64() };
+        var request = new
+        {
+            repo,
+            operationKey = key,
+            expectedCorpusEpoch = state.GetProperty("epoch").GetGuid(),
+            expectedCorpusRevision = state.GetProperty("revision").GetInt64()
+        };
         using HttpResponseMessage created = await client.PostAsJsonAsync("/api/context/groups/resolve", request, Ct);
         created.StatusCode.ShouldBe(HttpStatusCode.OK);
         string result = await created.Content.ReadAsStringAsync(Ct);
@@ -49,7 +54,9 @@ public sealed class CorpusCommitApiTests(HostWebAppFixture fixture) : IClassFixt
         receipt.GetProperty("payloadHash").GetString().ShouldNotBeNull().Length.ShouldBe(64);
         using HttpResponseMessage changed = await client.PostAsJsonAsync("/api/context/groups/resolve", new
         {
-            repo = repo + "/changed", operationKey = key, expectedCorpusEpoch = state.GetProperty("epoch").GetGuid(),
+            repo = repo + "/changed",
+            operationKey = key,
+            expectedCorpusEpoch = state.GetProperty("epoch").GetGuid(),
         }, Ct);
         changed.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         using HttpResponseMessage lookup = await client.PostAsJsonAsync("/api/context/groups/lookup", new { repo }, Ct);

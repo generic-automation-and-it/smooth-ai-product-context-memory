@@ -26,7 +26,8 @@ public sealed class CoreCompatibilityTests
                 ticketMatch = "reference", tickets = new[] { new { provider = "local", key = "T-1", match = "reference" } },
                 repository = "synthetic/repo", initiativeName = "Compatibility"
             } }
-        })) { BaseAddress = new Uri("http://test.invalid/") };
+        }))
+        { BaseAddress = new Uri("http://test.invalid/") };
         var evidence = (await new CoreReader(http).SearchAsync("rule", new Selectors(), DateTimeOffset.UtcNow, false, TestContext.Current.CancellationToken)).ShouldHaveSingleItem();
         evidence.Uuid.ShouldBe(uuid);
         evidence.ProductMatch.ShouldBe("initiative");

@@ -29,7 +29,8 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
         await Should.ThrowAsync<ConflictException>(async () => await Writer.Handle(
             Write(group.Uuid, "subject", "fact") with
             {
-                OperationKey = "product-stale", ExpectedCorpusEpoch = before.Epoch,
+                OperationKey = "product-stale",
+                ExpectedCorpusEpoch = before.Epoch,
                 ExpectedCorpusRevision = before.Revision,
             }, Ct));
         (await Store.FindAsync("product-stale", Ct)).ShouldBeNull();
@@ -69,7 +70,8 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
         await Should.ThrowAsync<ConflictException>(async () => await Writer.Handle(
             Write(group.Uuid, "other", "fact") with
             {
-                OperationKey = "reference-stale", ExpectedCorpusEpoch = before.Epoch,
+                OperationKey = "reference-stale",
+                ExpectedCorpusEpoch = before.Epoch,
                 ExpectedCorpusRevision = before.Revision,
             }, Ct));
     }
@@ -95,7 +97,9 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
         CorpusState state = await Store.GetStateAsync(Ct);
         SetMemories.Request create = Write(group.Uuid, "subject", "first") with
         {
-            OperationKey = "create", ExpectedCorpusEpoch = state.Epoch, ExpectedCorpusRevision = state.Revision,
+            OperationKey = "create",
+            ExpectedCorpusEpoch = state.Epoch,
+            ExpectedCorpusRevision = state.Revision,
         };
         SetMemories.Response first = await Writer.Handle(create, Ct);
         SetMemories.Response replay = await Writer.Handle(create, Ct);
@@ -103,7 +107,9 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
         state = await Store.GetStateAsync(Ct);
         SetMemories.Request bump = Write(group.Uuid, "subject", "second", first.Items[0].Uuid) with
         {
-            OperationKey = "bump", ExpectedCorpusEpoch = state.Epoch, ExpectedCorpusRevision = state.Revision,
+            OperationKey = "bump",
+            ExpectedCorpusEpoch = state.Epoch,
+            ExpectedCorpusRevision = state.Revision,
             Items = [Write(group.Uuid, "subject", "second", first.Items[0].Uuid).Items[0] with { ExpectedVersion = 1 }],
         };
         SetMemories.Response bumped = await Writer.Handle(bump, Ct);
@@ -136,7 +142,9 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
         after.Revision.ShouldBeGreaterThan(before.Revision);
         await Should.ThrowAsync<ConflictException>(async () => await Writer.Handle(Write(group.Uuid, "service subject", "service fact") with
         {
-            OperationKey = "stale", ExpectedCorpusEpoch = before.Epoch, ExpectedCorpusRevision = before.Revision,
+            OperationKey = "stale",
+            ExpectedCorpusEpoch = before.Epoch,
+            ExpectedCorpusRevision = before.Revision,
         }, Ct));
         (await Store.FindAsync("stale", Ct)).ShouldBeNull();
         (await Db.Memories.CountAsync(Ct)).ShouldBe(1);
@@ -228,7 +236,9 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
         CorpusState state = await Store.GetStateAsync(Ct);
         SetMemories.Request request = Write(group.Uuid, "subject", "first") with
         {
-            OperationKey = "concurrent", ExpectedCorpusEpoch = state.Epoch, ExpectedCorpusRevision = state.Revision,
+            OperationKey = "concurrent",
+            ExpectedCorpusEpoch = state.Epoch,
+            ExpectedCorpusRevision = state.Revision,
         };
         await using var first = NewContext();
         await using var second = NewContext();
@@ -247,13 +257,18 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
         CorpusState state = await Store.GetStateAsync(Ct);
         SetMemories.Request request = Write(group.Uuid, "subject", "same fact", first.Items[0].Uuid) with
         {
-            OperationKey = "add-source", ExpectedCorpusEpoch = state.Epoch, ExpectedCorpusRevision = state.Revision,
+            OperationKey = "add-source",
+            ExpectedCorpusEpoch = state.Epoch,
+            ExpectedCorpusRevision = state.Revision,
         };
-        request = request with { Items = [request.Items[0] with
+        request = request with
+        {
+            Items = [request.Items[0] with
         {
             ExpectedVersion = 1,
             Sources = [new SourceInput("message", "message:added", null, new EvidenceDocument { Category = "observed_implementation" })],
-        }] };
+        }]
+        };
         await Writer.Handle(request, Ct);
         await Writer.Handle(request, Ct);
         MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking().OrderBy(v => v.Version).ToArrayAsync(Ct);
@@ -299,10 +314,13 @@ public sealed class CorpusCommitBoundaryTests(AspireFixture aspire) : HandlerTes
     {
         MemoryGroup group = await GroupAsync();
         SetMemories.Request request = Write(group.Uuid, "subject", "first");
-        await Writer.Handle(request with { Items = [request.Items[0] with
+        await Writer.Handle(request with
+        {
+            Items = [request.Items[0] with
         {
             Sources = [new SourceInput("message", "message:1", null, new EvidenceDocument { Category = "approved_intent" })],
-        }] }, Ct);
+        }]
+        }, Ct);
         Db.DiscardTrackedState();
         MemoryVersion version = await Db.MemoryVersions.SingleAsync(Ct);
         version.Sources = [SourceDocument.Create("message", "message:2", evidence: new EvidenceDocument { Category = "observed_implementation" })];
