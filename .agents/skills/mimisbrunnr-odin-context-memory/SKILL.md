@@ -902,3 +902,7 @@ Offer `--dryrun` whenever a batch is large, unfamiliar, or contains gated kinds.
 
 `diverged` counts newly created proposed divergence records. Generated divergence is never evidence for
 another conflict; an existing unresolved record for the same unordered exact-claim pair is not counted again.
+
+## Optional service capture ownership
+
+When the optional knowledge-service caller owns capture for a task, hand off attributed learning through that caller and preserve pending receipts. Do not also run direct capture for the same learning. Acknowledgement is not incorporation. Switch ownership only with an explicit handoff that accounts for pending work; direct mode remains independently available.

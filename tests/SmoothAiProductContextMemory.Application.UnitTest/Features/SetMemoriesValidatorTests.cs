@@ -1,5 +1,6 @@
 using NodaTime;
 using FluentValidation.TestHelper;
+using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
@@ -9,6 +10,20 @@ namespace SmoothAiProductContextMemory.Application.UnitTest.Features;
 public class SetMemoriesValidatorTests
 {
     private readonly SetMemories.Validator _validator = new();
+
+    [Theory]
+    [InlineData("document_approval", 1, true)]
+    [InlineData("reported_fact", 1, true)]
+    [InlineData("approved_document", 1, false)]
+    [InlineData("document_approval", 2, false)]
+    public void Document_approval_uses_the_explicit_shape_one_evidence_contract(string category, int shape, bool accepted)
+    {
+        var evidence = new EvidenceDocument { V = shape, Category = category };
+        var item = new SetMemories.MemoryWrite(null, "Document approval", "Design document", "The design document is approved.", "Document approval", "decision", null, null, "proposed", 50, "Synthetic source", [new SourceInput("conversation", "synthetic://document-approval", null, evidence)], SystemClock.Instance.GetCurrentInstant(), null, null, null);
+        var result = _validator.TestValidate(new SetMemories.Request(Guid.NewGuid(), [item], null, null, DryRun: true));
+        if (accepted) result.ShouldNotHaveAnyValidationErrors();
+        else result.ShouldHaveValidationErrorFor("Items[0].Sources[0].Evidence");
+    }
 
     [Fact]
     public void Rejects_empty_group_and_blank_item()

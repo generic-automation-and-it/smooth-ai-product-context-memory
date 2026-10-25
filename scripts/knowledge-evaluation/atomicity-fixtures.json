@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "principle": "One independently meaningful claim keeps its load-bearing conditions and exceptions; independent claims must split.",
+  "cases": [
+    {"id":"refund-but-only","statement":"Refunds are allowed within 30 days, but only for unused products.","verdict":"simple","expectedClaims":1,"necessaryConditions":["within 30 days","unused products"]},
+    {"id":"refund-only-paraphrase","statement":"Refunds are allowed within 30 days only for unused products.","verdict":"simple","expectedClaims":1,"necessaryConditions":["within 30 days","unused products"]},
+    {"id":"refund-semicolon-condition","statement":"Refunds are allowed within 30 days; only unused products qualify.","verdict":"simple","expectedClaims":1,"necessaryConditions":["within 30 days","unused products"]},
+    {"id":"refund-exception","statement":"Refunds are allowed within 30 days unless the product has been used.","verdict":"simple","expectedClaims":1,"necessaryConditions":["within 30 days","unless the product has been used"]},
+    {"id":"fraud-exception","statement":"Elm refunds below $10 may use automatic approval, except when fraud is flagged.","verdict":"simple","expectedClaims":1,"necessaryConditions":["Elm","below $10","fraud is flagged"]},
+    {"id":"pending-while","statement":"Exports remain blocked while approval is pending.","verdict":"simple","expectedClaims":1,"necessaryConditions":["approval is pending"]},
+    {"id":"refund-but-only-if","statement":"Refunds are allowed within 30 days, but only if a receipt is supplied.","verdict":"simple","expectedClaims":1,"necessaryConditions":["within 30 days","receipt is supplied"]},
+    {"id":"refund-eligibility-condition","statement":"Refunds are allowed within 30 days; only unused products are eligible.","verdict":"simple","expectedClaims":1,"necessaryConditions":["within 30 days","unused products"]},
+    {"id":"independent-semicolon","statement":"Refunds are allowed within 30 days; exports run nightly.","verdict":"bundled","expectedClaims":2,"necessaryConditions":["within 30 days","nightly"]},
+    {"id":"independent-but","statement":"Refunds are allowed within 30 days, but invoices require supervisor approval.","verdict":"bundled","expectedClaims":2,"necessaryConditions":["within 30 days","supervisor approval"]},
+    {"id":"independent-while","statement":"Groups preserve task identity while versions preserve changed claims.","verdict":"bundled","expectedClaims":2,"necessaryConditions":["task identity","changed claims"]},
+    {"id":"qualified-plus-independent","statement":"Refunds are allowed within 30 days, but only for unused products; exports run nightly.","verdict":"bundled","expectedClaims":2,"necessaryConditions":["within 30 days","unused products","nightly"]},
+    {"id":"tally-independent","statement":"Two rules apply: refunds require review and exports require encryption.","verdict":"bundled","expectedClaims":2,"necessaryConditions":["review","encryption"]},
+    {"id":"independent-however","statement":"Refunds require review; however, exports require encryption.","verdict":"bundled","expectedClaims":2,"necessaryConditions":["review","encryption"]},
+    {"id":"but-only-unrelated-subject","statement":"Refunds are allowed within 30 days, but only exports require encryption.","verdict":"bundled","expectedClaims":2,"necessaryConditions":["within 30 days","encryption"]},
+    {"id":"only-qualify-unrelated-predicate","statement":"Refunds are allowed within 30 days; only premium accounts qualify for nightly exports.","verdict":"bundled","expectedClaims":2,"necessaryConditions":["within 30 days","premium accounts","nightly exports"]}
+  ]
+}

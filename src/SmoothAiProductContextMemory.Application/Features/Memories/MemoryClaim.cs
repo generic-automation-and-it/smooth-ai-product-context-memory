@@ -6,7 +6,7 @@ using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.Features.Memories;
 
-using SourceRef = (string Kind, string Reference, Instant? CapturedAt);
+using SourceRef = (string Kind, string Reference, Instant? CapturedAt, EvidenceDocument? Evidence);
 
 /// <summary>
 /// The claim a version actually asserts, projected to the fields that decide whether a version bump is
@@ -35,7 +35,7 @@ public sealed record MemoryClaim(
         write.Kind,
         write.Status,
         write.Confidence,
-        write.Sources?.Select(s => (s.Kind, s.Reference, s.CapturedAt)).ToList() ?? [],
+        write.Sources?.Select(s => (s.Kind, s.Reference, s.CapturedAt, s.Evidence)).ToList() ?? [],
         write.ValidUntil is { } validUntil ? TruncateToMicroseconds(validUntil) : null,
         string.IsNullOrEmpty(write.Content)
             ? null
@@ -47,7 +47,7 @@ public sealed record MemoryClaim(
         version.Kind,
         version.Status,
         version.Confidence,
-        version.Sources.Select(s => (s.Kind, s.Reference, s.CapturedAt)).ToList(),
+        version.Sources.Select(s => (s.Kind, s.Reference, s.CapturedAt, s.Evidence)).ToList(),
         version.ValidUntil is { } validUntil ? TruncateToMicroseconds(validUntil) : null,
         version.BlobAddress);
 
@@ -76,7 +76,8 @@ public sealed record MemoryClaim(
             SourceRef b = right[index];
             if (!string.Equals(a.Kind, b.Kind, StringComparison.Ordinal)
                 || !string.Equals(a.Reference, b.Reference, StringComparison.Ordinal)
-                || a.CapturedAt != b.CapturedAt)
+                || a.CapturedAt != b.CapturedAt
+                || !EvidenceEqual(a.Evidence, b.Evidence))
             {
                 return false;
             }
@@ -84,6 +85,13 @@ public sealed record MemoryClaim(
 
         return true;
     }
+
+    private static bool EvidenceEqual(EvidenceDocument? a, EvidenceDocument? b) =>
+        ReferenceEquals(a, b) || (a is not null && b is not null
+            && a.V == b.V && a.Category == b.Category && a.Applicability == b.Applicability
+            && a.Authority == b.Authority && a.AuthorityReference == b.AuthorityReference
+            && a.AuthorityQuote == b.AuthorityQuote && a.ScopeDimension == b.ScopeDimension
+            && a.ScopeIdentifier == b.ScopeIdentifier);
 
     private static long NpgsqlEpochUnixTicks { get; } = Instant.FromUtc(2000, 1, 1, 0, 0).ToUnixTimeTicks();
 

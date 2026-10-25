@@ -79,7 +79,9 @@ public sealed record SnapshotCounts(
     int InitiativeVertices,
     int RepoVertices,
     int ProductInitiativeEdges,
-    int ProductRepoEdges);
+    int ProductRepoEdges,
+    int OperationReceipts = 0);
+
 
 /// <summary>What is deliberately absent from the archive, stated rather than reported as loss.</summary>
 public sealed record SnapshotExclusions(IReadOnlyList<string> Items);
@@ -101,7 +103,10 @@ public static class SnapshotFormat
     // v5: ABOUT memory→ticket reference edges were added to the archive and SnapshotCounts. Archives
     // written before them (v4, members absent) would silently drop every reference on restore, so
     // they are refused at the manifest version gate.
-    public const int Version = 5;
+    public const int Version = 6;
+    // v6 adds operation receipts without dropping v5 graph members.
+    // Earlier branch-specific v4 archives require explicit migration.
+    public static bool IsSupported(int version) => version is 5 or Version;
 }
 
 /// <summary>Canonical logical names for archive members that are not blob bodies.</summary>
@@ -124,4 +129,5 @@ public static class SnapshotEntryNames
     public const string RepoVertices = "graph/repo_vertices.json";
     public const string ProductInitiativeEdges = "graph/product_initiative_edges.json";
     public const string ProductRepoEdges = "graph/product_repo_edges.json";
+    public const string OperationReceipts = "relational/operation_receipt.json";
 }

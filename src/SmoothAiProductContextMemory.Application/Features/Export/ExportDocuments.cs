@@ -27,7 +27,7 @@ public sealed record ExportGroupDocument(
     ExportGroupDescription? CurrentDescription,
     IReadOnlyList<ExportGroupDescription> HistoricalDescriptions);
 
-public sealed record ExportSource(string Kind, string Reference, Instant? CapturedAt);
+public sealed record ExportSource(string Kind, string Reference, Instant? CapturedAt, EvidenceDocument? Evidence = null);
 
 public sealed record ExportLink(
     string Direction,

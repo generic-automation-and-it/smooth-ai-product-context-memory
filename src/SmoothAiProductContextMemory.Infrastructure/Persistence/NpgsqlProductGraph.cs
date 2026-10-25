@@ -215,6 +215,7 @@ public sealed class NpgsqlProductGraph(SmoothAiProductContextMemoryDbContext db)
                     RETURN 1
                     """;
                 await ExecuteScalarAsync(update, cancellationToken);
+                await new NpgsqlCorpusCommitStore(db).AdvanceRevisionAsync(cancellationToken);
             }
 
             return false;
@@ -223,6 +224,7 @@ public sealed class NpgsqlProductGraph(SmoothAiProductContextMemoryDbContext db)
         string? descriptionClause = description is null ? null : $", description: {Quote(description)}";
         string create = $"CREATE (p:{AgeSession.ProductLabel} {{name: {Quote(name)}, status: {Quote(status ?? "active")}{descriptionClause}}}) RETURN 1";
         await ExecuteScalarAsync(create, cancellationToken);
+        await new NpgsqlCorpusCommitStore(db).AdvanceRevisionAsync(cancellationToken);
         return true;
     }
 
@@ -252,6 +254,7 @@ public sealed class NpgsqlProductGraph(SmoothAiProductContextMemoryDbContext db)
             throw new ConflictException($"Product '{productName}' is no longer registered; the link was not created.");
         }
 
+        await new NpgsqlCorpusCommitStore(db).AdvanceRevisionAsync(cancellationToken);
         return true;
     }
 
@@ -268,7 +271,9 @@ public sealed class NpgsqlProductGraph(SmoothAiProductContextMemoryDbContext db)
             RETURN count(e)
             """;
         string? count = await ExecuteScalarAsync(cypher, cancellationToken);
-        return ParseAgtypeInteger(count) > 0;
+        bool removed = ParseAgtypeInteger(count) > 0;
+        if (removed) await new NpgsqlCorpusCommitStore(db).AdvanceRevisionAsync(cancellationToken);
+        return removed;
     }
 
     private async Task<RepoLinkResult> LinkRepoWithinTransactionAsync(
@@ -304,6 +309,7 @@ public sealed class NpgsqlProductGraph(SmoothAiProductContextMemoryDbContext db)
             throw new ConflictException($"Product '{productName}' is no longer registered; the link was not created.");
         }
 
+        await new NpgsqlCorpusCommitStore(db).AdvanceRevisionAsync(cancellationToken);
         return new RepoLinkResult(true, null);
     }
 
@@ -409,6 +415,7 @@ public sealed class NpgsqlProductGraph(SmoothAiProductContextMemoryDbContext db)
 
     private async Task AcquireLockAsync(CancellationToken cancellationToken)
     {
+        await new NpgsqlCorpusCommitStore(db).LockAsync(cancellationToken);
         await using NpgsqlCommand command = await CreateRelationalCommandAsync(
             $"SELECT pg_advisory_xact_lock({AdvisoryLockKey}, {AdvisoryLockId});",
             cancellationToken);

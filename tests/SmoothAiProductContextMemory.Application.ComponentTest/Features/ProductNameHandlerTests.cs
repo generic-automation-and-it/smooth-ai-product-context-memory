@@ -305,7 +305,7 @@ public sealed class ProductNameHandlerTests(AspireFixture aspire) : HandlerTestB
         new(AppDb, Search, new NoopRecallFeedback(), ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
 
     private SetMemories.Handler NewSet() =>
-        new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>());
+        new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
 
     private sealed class NoopRecallFeedback : IRecallFeedback
     {

@@ -196,7 +196,8 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
                 x.version.Version,
                 x.version.IsCurrent,
                 x.version.Sources,
-                x.version.CreatedOn)
+                x.version.CreatedOn,
+                x.version.BlobAddress != null)
             {
                 Repository = x.grp.Repo,
                 InitiativeName = x.InitiativeName,

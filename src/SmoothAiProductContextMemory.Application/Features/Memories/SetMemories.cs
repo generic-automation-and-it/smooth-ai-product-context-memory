@@ -42,7 +42,8 @@ public static class SetMemories
         Instant? ValidUntil,
         string? SummaryModel,
         string? SummaryPromptVersion,
-        Guid? CreateUuid = null);
+        Guid? CreateUuid = null,
+        int? ExpectedVersion = null);
 
     public sealed record LinkWrite(Guid SourceUuid, Guid TargetUuid, string Relation, string Reason);
 
@@ -53,7 +54,11 @@ public static class SetMemories
         IReadOnlyList<string>? LabelsProposed,
         IReadOnlyList<TicketReferenceInput>? TicketReferences = null,
         bool DryRun = false,
-        string? ProductName = null) : IRequest<Response>;
+        string? ProductName = null,
+        string? OperationKey = null,
+        Guid? ExpectedCorpusEpoch = null,
+        long? ExpectedCorpusRevision = null) : IRequest<Response>;
+
 
     /// <summary>
     /// <see cref="Uuid"/> is stable on dry-run when the caller supplied <c>createUuid</c>; legacy
@@ -81,12 +86,24 @@ public static class SetMemories
         public Validator()
         {
             RuleFor(x => x.GroupUuid).NotEmpty();
+            RuleFor(x => x.OperationKey).NotEmpty().MaximumLength(200).When(x => x.OperationKey is not null);
+            RuleFor(x => x.ExpectedCorpusEpoch).NotNull().NotEqual(Guid.Empty).When(x => x.OperationKey is not null);
+            RuleFor(x => x.ExpectedCorpusRevision).GreaterThanOrEqualTo(0).When(x => x.ExpectedCorpusRevision is not null);
             RuleFor(x => x.Items).NotNull().NotEmpty();
             RuleFor(x => x.Items)
                 .Must(i => i is null || i.Count <= 200)
                 .WithMessage("At most 200 items may be written per request.");
             RuleForEach(x => x.Items).ChildRules(item =>
             {
+                item.RuleFor(i => i.ExpectedVersion).GreaterThan(0).When(i => i.ExpectedVersion is not null);
+                item.RuleFor(i => i).Must(i => i.ExpectedVersion is null || i.Uuid is not null)
+                    .WithMessage("ExpectedVersion requires a version target.");
+                item.RuleForEach(i => i.Sources).ChildRules(source =>
+                {
+                    source.RuleFor(s => s.Evidence).Must(e => e is null || (e.V == 1
+                        && e.Category is "reported_fact" or "suggestion" or "document_approval" or "approved_intent" or "observed_implementation" or "unknown"))
+                        .WithMessage("Evidence must use shape 1 and a supported category.");
+                });
                 item.RuleFor(i => i.Name).NotEmpty().MaximumLength(200);
                 item.RuleFor(i => i.Description).NotEmpty();
                 item.RuleFor(i => i.Description)
@@ -193,7 +210,8 @@ public static class SetMemories
         IBlobStorage blobStorage,
         IDbErrorMapper errorMapper,
         IProductGraph productGraph,
-        ILogger<Handler> logger) : IRequestHandler<Request, Response>
+        ILogger<Handler> logger,
+        ICorpusCommitStore commitStore) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
@@ -202,15 +220,34 @@ public static class SetMemories
                 request.Items.Count,
                 request.DryRun);
 
-            MemoryGroup group = await db.MemoryGroups
-                .SingleOrDefaultAsync(g => g.Uuid == request.GroupUuid, cancellationToken)
-                ?? throw new NotFoundException($"Group '{request.GroupUuid}' was not found.");
+            WritePlan plan;
+            if (request.DryRun)
+            {
+                CorpusState state = await commitStore.GetStateAsync(cancellationToken);
+                CorpusCommit.CheckEpoch(state, request.ExpectedCorpusEpoch);
+                CorpusCommit.CheckRevision(state, request.ExpectedCorpusRevision);
+                plan = await ReadPlanAsync(request, cancellationToken);
+            }
+            else
+            {
+                await using var readTransaction = await db.Database.BeginTransactionAsync(cancellationToken);
+                CorpusState state = await commitStore.LockAsync(cancellationToken);
+                CorpusCommit.CheckEpoch(state, request.ExpectedCorpusEpoch);
+                if (request.OperationKey is { } key
+                    && await commitStore.FindAsync(key, cancellationToken) is { } prior)
+                {
+                    return CorpusCommit.Replay<Response>(prior, PayloadHash(request), "memories");
+                }
 
-            WritePlan plan = await BuildPlanAsync(request, group, cancellationToken);
+                CorpusCommit.CheckRevision(state, request.ExpectedCorpusRevision);
+                db.DiscardTrackedState();
+                plan = await ReadPlanAsync(request, cancellationToken);
+                await readTransaction.CommitAsync(cancellationToken);
+            }
 
             Response response = request.DryRun
                 ? Predict(plan)
-                : await PersistAsync(plan, cancellationToken);
+                : await PersistAsync(request, plan, cancellationToken);
 
             logger.LogInformation(
                 "Set memories completed. Created: {Created} Versioned: {Versioned} Unchanged: {Unchanged} Linked: {Linked} Diverged: {Diverged} Skipped: {Skipped} DryRun: {DryRun}",
@@ -229,6 +266,14 @@ public static class SetMemories
         /// Resolves every write against stored state without mutating anything. Shared by dry run and
         /// persist so the two cannot diverge.
         /// </summary>
+        private async Task<WritePlan> ReadPlanAsync(Request request, CancellationToken cancellationToken)
+        {
+            MemoryGroup group = await db.MemoryGroups
+                .SingleOrDefaultAsync(g => g.Uuid == request.GroupUuid, cancellationToken)
+                ?? throw new NotFoundException($"Group '{request.GroupUuid}' was not found.");
+            return await BuildPlanAsync(request, group, cancellationToken);
+        }
+
         private async Task<WritePlan> BuildPlanAsync(
             Request request,
             MemoryGroup group,
@@ -311,6 +356,11 @@ public static class SetMemories
                         versionTarget = (memory, current, current.Version + 1, MemoryClaim.FromVersion(current));
                     }
 
+                    if (item.ExpectedVersion is { } expectedVersion && expectedVersion != versionTarget.Current.Version)
+                    {
+                        throw new ConflictException($"Memory '{target}' changed since comparison.");
+                    }
+
                     MemoryClaim incoming = MemoryClaim.FromWrite(item);
                     if (MemoryClaim.Same(incoming, versionTarget.LastClaim))
                     {
@@ -326,6 +376,7 @@ public static class SetMemories
                             versionTarget.LastClaim.BlobAddress));
                         continue;
                     }
+
 
                     logger.LogDebug("Planned version bump. Index: {Index} NextVersion: {Version}", index, versionTarget.NextVersion);
                     items.Add(new PlannedItem(
@@ -576,7 +627,9 @@ public static class SetMemories
                 plan.Items.Count(i => i.Mode == ItemMode.Create && i.Write.Kind == MemoryVersion.KindValue.Divergence),
                 plan.LabelsToInsert.Count);
 
-        private async Task<Response> PersistAsync(WritePlan plan, CancellationToken cancellationToken)
+        private static string PayloadHash(Request request) => CorpusCommit.Hash(request with { OperationKey = null });
+
+        private async Task<Response> PersistAsync(Request request, WritePlan plan, CancellationToken cancellationToken)
         {
             // Blobs are content-addressed and immutable, so they are stored before the transaction
             // opens: the write is idempotent on retry and the transaction never stays open across
@@ -587,6 +640,12 @@ public static class SetMemories
             {
                 if (plan.Items[index].Mode == ItemMode.Unchanged)
                 {
+                    // The locked replan can turn this into a version after a concurrent write.
+                    // Reuse the immutable body already matched by the initial plan in that case.
+                    if (plan.Items[index].MatchedBlobAddress is { } existingAddress)
+                    {
+                        addresses[index] = existingAddress;
+                    }
                     continue;
                 }
 
@@ -600,6 +659,20 @@ public static class SetMemories
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             try
             {
+                CorpusState state = await commitStore.LockAsync(cancellationToken);
+                CorpusCommit.CheckEpoch(state, request.ExpectedCorpusEpoch);
+                if (request.OperationKey is { } operationKey
+                    && await commitStore.FindAsync(operationKey, cancellationToken) is { } prior)
+                {
+                    return CorpusCommit.Replay<Response>(prior, PayloadHash(request), "memories");
+                }
+
+                CorpusCommit.CheckRevision(state, request.ExpectedCorpusRevision);
+                db.DiscardTrackedState();
+                MemoryGroup lockedGroup = await db.MemoryGroups
+                    .SingleOrDefaultAsync(g => g.Uuid == request.GroupUuid, cancellationToken)
+                    ?? throw new NotFoundException($"Group '{request.GroupUuid}' was not found.");
+                plan = await BuildPlanAsync(request, lockedGroup, cancellationToken);
                 var results = new List<ItemResult>(plan.Items.Count);
                 var currentVersions = new Dictionary<Guid, MemoryVersion>();
 
@@ -678,10 +751,15 @@ public static class SetMemories
                     productLinks = linkCreated ? 1 : 0;
                 }
 
-                await transaction.CommitAsync(cancellationToken);
-
                 (int created, int versioned, int unchanged, int diverged, int labels) = Counts(plan);
-                return new Response(created, versioned, unchanged, linked, diverged, skipped, labels, referencesCreated, referencesAlreadyPresent, results, productLinks);
+                var response = new Response(created, versioned, unchanged, linked, diverged, skipped, labels, referencesCreated, referencesAlreadyPresent, results, productLinks);
+                if (request.OperationKey is { } key)
+                {
+                    await commitStore.RecordAsync(CorpusCommit.Receipt(key, PayloadHash(request), "memories", response), cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+                return response;
             }
             catch
             {
@@ -766,7 +844,7 @@ public static class SetMemories
                 Confidence = item.Confidence,
                 Status = item.Status,
                 Sources = item.Sources?
-                .Select(s => SourceDocument.Create(s.Kind, s.Reference, s.CapturedAt))
+                .Select(s => SourceDocument.Create(s.Kind, s.Reference, s.CapturedAt, s.Evidence))
                 .ToList() ?? [],
                 ValidFrom = item.ValidFrom,
                 ValidUntil = item.ValidUntil,

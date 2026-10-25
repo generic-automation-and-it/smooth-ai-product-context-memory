@@ -1,5 +1,7 @@
 # Memory recall feedback — High-Level Design
 
+> Optional-service feature amendment: recall now carries direct/service/comparison attribution and caller-request identity. Default tuning results preserve the direct population; explicit origin filters or all expose other populations, with caller counts separate from internal passes. See [HLD-008 LADR-03](../008-optional-knowledge-service/ladrs/LADR-03-shared-semantics-and-attributed-workflows.md). Original retrieval/miss fields remain pass counts.
+
 | | |
 |---|---|
 | **Status** | Implemented — retention bound and asynchronous feedback write not implemented |

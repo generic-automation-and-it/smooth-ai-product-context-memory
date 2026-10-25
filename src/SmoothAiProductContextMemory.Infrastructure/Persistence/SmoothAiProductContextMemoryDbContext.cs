@@ -62,6 +62,8 @@ public sealed class SmoothAiProductContextMemoryDbContext(DbContextOptions<Smoot
         return Database.SqlQueryRaw<OwnedTicketIdentity>(sql, groupUuids.ToArray());
     }
 
+    public void DiscardTrackedState() => ChangeTracker.Clear();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SmoothAiProductContextMemoryDbContext).Assembly);

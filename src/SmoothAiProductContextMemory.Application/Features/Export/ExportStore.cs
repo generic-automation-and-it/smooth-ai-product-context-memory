@@ -224,7 +224,7 @@ public static class ExportStore
                 version.Sources
                     .OrderBy(s => s.Kind, StringComparer.Ordinal)
                     .ThenBy(s => s.Reference, StringComparer.Ordinal)
-                    .Select(s => new ExportSource(s.Kind, s.Reference, s.CapturedAt))
+                    .Select(s => new ExportSource(s.Kind, s.Reference, s.CapturedAt, s.Evidence))
                     .ToArray(),
                 state,
                 text);

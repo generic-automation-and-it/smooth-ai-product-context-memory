@@ -60,7 +60,7 @@ public sealed class ResolveGroupHandlerTests(AspireFixture aspire) : HandlerTest
     }
 
     private ResolveGroup.Handler NewHandler() =>
-        new(AppDb, ErrorMapper, new NpgsqlTicketGraph(Db), Loggers.CreateLogger<ResolveGroup.Handler>());
+        new(AppDb, ErrorMapper, new NpgsqlTicketGraph(Db), Loggers.CreateLogger<ResolveGroup.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
 
     private static ResolveGroup.Request Request(params string[] keys) =>
         new([.. keys.Select(key => new TicketInput("jira", key, ""))], null, null, null, null, null, null, null);

@@ -13,7 +13,8 @@ public static class GetNeverRecalledMemories
 {
     public sealed record Request(
         Instant AsOf,
-        int? Limit = 500) : IRequest<Response>;
+        int? Limit = 500,
+        string? RecallPurpose = null) : IRequest<Response>;
 
     public sealed record Response(IReadOnlyList<NeverRecalledRow> Items);
 
@@ -22,6 +23,7 @@ public static class GetNeverRecalledMemories
         public Validator()
         {
             RuleFor(x => x.Limit).InclusiveBetween(1, 5000).When(x => x.Limit is not null);
+            RuleFor(x => x.RecallPurpose).Must(purpose => Abstractions.RecallPurpose.IsFilter(purpose!)).When(x => x.RecallPurpose is not null);
         }
     }
 
@@ -31,7 +33,7 @@ public static class GetNeverRecalledMemories
         {
             IReadOnlyList<NeverRecalledRow> items =
                 await query.NeverRecalledAsync(
-                    new NeverRecalledRequest(request.AsOf, request.Limit), cancellationToken);
+                    new NeverRecalledRequest(request.AsOf, request.Limit, request.RecallPurpose), cancellationToken);
 
             return new Response(items);
         }
