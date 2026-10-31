@@ -577,8 +577,10 @@ function Remove-ExistingController {
     if ($LASTEXITCODE -ne 0) { return }
 
     $state = (& docker container inspect --format '{{.State.Status}}' $script:ControllerName)
-    if ($state -eq 'running') {
-        Write-Info "replacing the running $($script:ControllerName) (graceful stop; volumes preserved)"
+    # 'restarting' too: the restart policy can leave a failing controller between attempts, and
+    # `docker rm` refuses a restarting container, so skipping the stop would collide on the name.
+    if ($state -eq 'running' -or $state -eq 'restarting') {
+        Write-Info "replacing the $state $($script:ControllerName) (graceful stop; volumes preserved)"
         # The controller needs time to stop its workloads: 180 s matches its own --stop-timeout.
         & docker stop --time 180 $script:ControllerName *> $null
     }
@@ -624,6 +626,10 @@ function Start-Controller {
     $arguments = @(
         'run', '-d',
         '--name', $script:ControllerName,
+        # unless-stopped brings the controller back after an engine or machine restart, and the
+        # controller recreates its workloads. The workloads carry no policy of their own: the entrypoint
+        # removes and recreates them on every start, so a self-restarted workload would only race it.
+        '--restart', 'unless-stopped',
         # Must equal smooth-mímisbrunnr-release-<id> exactly: the controller cannot label itself, so a
         # mismatch leaves the dashboard's container ungrouped in Docker Desktop.
         '--label', "com.docker.compose.project=$($script:GroupName)",
