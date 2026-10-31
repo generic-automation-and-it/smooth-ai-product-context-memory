@@ -592,8 +592,9 @@ class DurabilityGuardTests(unittest.TestCase):
             write_unit(store, "proj-20260930-1900", "new")
             rc, out, _ = run(argv(store, review=True))
             self.assertEqual(rc, 0)
-            self.assertIn("proj-20260930-1900", out)
-            self.assertNotIn("proj-20260930-1700", out)
+            unpublished = out.partition("\nunpublished —")[2]
+            self.assertIn("proj-20260930-1900", unpublished)
+            self.assertNotIn("proj-20260930-1700", unpublished)
 
     def test_a_unit_whose_assets_were_left_out_is_not_published(self):
         """Review 5432012955 #3: the unit file alone counted as published, so a lost workspace could
