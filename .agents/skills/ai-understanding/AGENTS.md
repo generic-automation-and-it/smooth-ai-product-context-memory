@@ -141,6 +141,7 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-31 | Durability-guard test asserts on the `unpublished` section only; the whole-output check failed once the fixture date aged past the 30-day staleness flag | #304 |
 | 2026-10-24 | **`scripts/assets/` joined the WET copy set.** The shared gate loads two messages from `scripts/assets/`, so this skill's copy carries the folder and `parity_decisions_gate.py` compares the file set and every byte — a gate copied without its prose is not the same gate | this PR |
 | 2026-10-22 | **Decision settings are environment-only (APPHOST LADR-007).** The WET `decisions_gate.py` re-copied from the shared original (file loader removed); `gate_decisions._flag_set_nowhere` checks the environment only. `gate_behavior.py`: the two "file-only settings enable" cases replaced by one asserting a credential file naming a live stub leaves the gate `not-configured` with zero requests. | LADR-007 |
 | 2026-10-16 | **The WET copy of `decisions_gate.py` gained `--snapshot-file`**, applied identically to the shared original so `parity_decisions_gate.py` still holds them byte-equal. One run's verdicts, written whole beside the stable budget ledger: replaced rather than appended, and naming the ledger it complements. 174 -> 177 gate cases. | PR #278 |

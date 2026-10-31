@@ -873,8 +873,10 @@ remove_existing_controller() {
 
   local state
   state="$(docker container inspect --format '{{.State.Status}}' "$controller_name")"
-  if [ "$state" = running ]; then
-    log "replacing the running $controller_name (graceful stop; volumes preserved)"
+  # `restarting` too: the restart policy can leave a failing controller between attempts, and `docker rm`
+  # refuses a restarting container, so skipping the stop would collide on the name at `docker run`.
+  if [ "$state" = running ] || [ "$state" = restarting ]; then
+    log "replacing the $state $controller_name (graceful stop; volumes preserved)"
     # The controller needs time to stop its workloads: 180 s matches its own --stop-timeout.
     docker stop --time 180 "$controller_name" >/dev/null || true
   else
@@ -953,8 +955,12 @@ up() {
   # The group label must equal smooth-mímisbrunnr-release-<installation-id> exactly: the controller
   # cannot label itself, so a mismatch leaves the dashboard's container ungrouped in Docker Desktop.
   # Workload ports are not published here — the controller binds them on EngineConfiguration__BindAddress.
+  # unless-stopped brings the controller back after an engine or machine restart, and the controller
+  # recreates its workloads. The workloads carry no policy of their own: the entrypoint removes and
+  # recreates them on every start, so a self-restarted workload would only race it.
   docker run -d \
     --name "$controller_name" \
+    --restart unless-stopped \
     --label "com.docker.compose.project=$group_name" \
     --label "com.docker.compose.service=$controller_name" \
     --stop-timeout 180 \

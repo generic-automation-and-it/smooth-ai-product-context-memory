@@ -65,6 +65,16 @@ Two consequences worth knowing:
 The data-root binding is checked **before** anything is stopped. A mismatch is an operator mistake no
 restart can fix, and tearing the stack down first would leave the machine with nothing running.
 
+## It comes back after a Docker restart
+
+The controller is started with `--restart unless-stopped`, so a Docker Desktop or engine restart, or a
+reboot with Docker set to start at login, starts it again without a launcher run. On startup it removes
+and recreates its own workloads, as on any other start. Data and tokens are kept. The dashboard login
+token is new, so read it with `logs`. **Only the controller has a restart policy**: if a workload
+restarted itself, it would race the controller that is removing and recreating it. `stop` (or
+`docker stop`) keeps it stopped across a restart. A controller started by an earlier launcher has no
+policy until the next `up`, or until `docker update --restart unless-stopped mimisbrunnr-<id>-controller`.
+
 ## What it does, and what it will not do
 
 It starts **one** container: `mimisbrunnr-<id>-controller`. That controller starts the other four
