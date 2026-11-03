@@ -76,6 +76,7 @@ public static class DependencyInjection
         // Retrieval and error translation are provider-specific: matching the full-text and array
         // indexes needs Npgsql operators, and constraint identity is a SQLSTATE. Application depends
         // on the abstractions only.
+        services.AddScoped<ICorpusCommitStore, NpgsqlCorpusCommitStore>();
         services.AddScoped<IMemorySearch, NpgsqlMemorySearch>();
         services.AddScoped<IMemoryGraph, NpgsqlMemoryGraph>();
         services.AddScoped<IMemoryTraversal, NpgsqlMemoryTraversal>();

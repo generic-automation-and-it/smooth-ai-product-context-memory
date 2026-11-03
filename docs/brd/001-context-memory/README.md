@@ -8,7 +8,7 @@
 | **Owner** | Product owner / practitioner |
 | **Last updated** | 2026-09-29 |
 | **Related** | [HLD 001 — Storage](../../hlds/001-context-memory-storage/) · [HLD 002 — Write pipeline](../../hlds/002-context-memory-write-pipeline/) · [HLD 003 — Graph edges](../../hlds/003-graph-edges-on-age/) · [HLD 004 — Recall feedback](../../hlds/004-memory-recall-feedback/) · [HLD 006 — Corpus snapshot and restore](../../hlds/006-corpus-snapshot-and-restore/) |
-| **Extended by** | [BRD 002 — Contextual knowledge export](../002-contextual-export/) — continues this requirement space at `BR-18` |
+| **Extended by** | [BRD 002 — Contextual knowledge export](../002-contextual-export/) — continues this requirement space at `BR-18`; [BRD 004 — Optional knowledge assistance](../004-optional-knowledge-service/) — authorized feature scope at `BR-47` onwards, implementation acceptance in progress |
 
 > This document states **what the business needs and why**. It deliberately contains no technology
 > choices, no data structures and no implementation detail — those live in the HLDs.

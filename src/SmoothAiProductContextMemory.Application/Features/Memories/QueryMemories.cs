@@ -41,7 +41,10 @@ public static class QueryMemories
         int Limit = MemorySearchDefaults.Limit,
         string FacetMatchMode = FacetMatchModeValue.Any,
         string? ProductName = null,
-        bool Inspect = false) : IRequest<Response>;
+        bool Inspect = false,
+        string RecallPurpose = Abstractions.RecallPurpose.DirectRetrieval,
+        Guid? CallerRequestId = null) : IRequest<Response>;
+
 
     /// <summary>
     /// The retrieval response. <see cref="Inspection"/> is null for a normal retrieval (carrying the
@@ -94,6 +97,8 @@ public static class QueryMemories
             RuleFor(x => x.Status).MaximumLength(32);
             RuleFor(x => x.ScopeDimension).MaximumLength(32);
             RuleFor(x => x.Limit).InclusiveBetween(1, MemorySearchDefaults.MaxLimit);
+            RuleFor(x => x.RecallPurpose).Must(Abstractions.RecallPurpose.IsKnown);
+            RuleFor(x => x.CallerRequestId).NotEqual(Guid.Empty).When(x => x.CallerRequestId is not null);
             RuleFor(x => x.FacetMatchMode)
                 .Must(mode => FacetMatchModeValue.Allowed.Contains(mode, StringComparer.Ordinal))
                 .WithMessage($"FacetMatchMode must be one of: {string.Join(", ", FacetMatchModeValue.Allowed)}.");
@@ -153,7 +158,7 @@ public static class QueryMemories
                     }
 
                     logger.LogInformation("Query memories completed. Count: {Count}", 0);
-                    Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn)]);
+                    Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn, request.RecallPurpose, request.CallerRequestId)]);
                     return new Response([]);
                 }
 
@@ -277,14 +282,14 @@ public static class QueryMemories
             // fail the retrieval; it cannot change the result set, ordering, limit or ranking.
             if (items.Count == 0)
             {
-                Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn)]);
+                Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn, request.RecallPurpose, request.CallerRequestId)]);
             }
             else
             {
                 RecallFeedbackRecord[] records = new RecallFeedbackRecord[items.Count];
                 for (int i = 0; i < items.Count; i++)
                 {
-                    records[i] = new RecallFeedbackRecord(retrievalId, items[i].Uuid, shape, occurredOn);
+                    records[i] = new RecallFeedbackRecord(retrievalId, items[i].Uuid, shape, occurredOn, request.RecallPurpose, request.CallerRequestId);
                 }
 
                 Emit(records);

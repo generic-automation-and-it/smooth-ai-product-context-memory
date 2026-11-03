@@ -1237,6 +1237,8 @@ class LedgerIntegrityTests(GateTestCase):
         """Consumer review 5441621898 #6: an existing ledger that cannot be opened read as a first run,
         so the spent budgets were cleared with no `ledgerReset`. A write-only file is unreadable but
         still replaceable, so the case isolates the read."""
+        if os.name == "nt":
+            self.skipTest("Windows chmod cannot create a POSIX write-only file")
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             self.skipTest("root reads a mode-0200 file, so the permission case cannot be built")
         self.stub.probabilities = dict(self.LOW)

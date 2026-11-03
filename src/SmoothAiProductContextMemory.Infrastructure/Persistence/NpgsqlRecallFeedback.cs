@@ -46,16 +46,18 @@ public sealed class NpgsqlRecallFeedback(NpgsqlDataSource dataSource, ILogger<Np
                 values.Append(", ");
             }
 
-            int b = i * 4;
-            values.Append($"(@p{b + 1}, @p{b + 2}, @p{b + 3}, @p{b + 4})");
+            int b = i * 6;
+            values.Append($"(@p{b + 1}, @p{b + 2}, @p{b + 3}, @p{b + 4}, @p{b + 5}, @p{b + 6})");
             command.Parameters.AddWithValue($"p{b + 1}", record.RetrievalId);
             command.Parameters.AddWithValue($"p{b + 2}", (object?)record.MemoryUuid ?? DBNull.Value);
             command.Parameters.AddWithValue($"p{b + 3}", record.Shape);
             command.Parameters.AddWithValue($"p{b + 4}", record.OccurredOn);
+            command.Parameters.AddWithValue($"p{b + 5}", record.Purpose);
+            command.Parameters.AddWithValue($"p{b + 6}", (object?)record.CallerRequestId ?? DBNull.Value);
         }
 
         command.CommandText =
-            $"INSERT INTO public.recall_feedback (retrieval_id, memory_uuid, shape, occurred_on) VALUES {values}";
+            $"INSERT INTO public.recall_feedback (retrieval_id, memory_uuid, shape, occurred_on, purpose, caller_request_id) VALUES {values}";
 
         using NpgsqlConnection connection = dataSource.OpenConnection();
         command.Connection = connection;

@@ -24,7 +24,9 @@ public sealed record SnapshotCapture(
     IReadOnlyList<SnapshotNamedVertex> InitiativeVertices,
     IReadOnlyList<SnapshotNamedVertex> RepoVertices,
     IReadOnlyList<SnapshotProductInitiativeEdge> ProductInitiativeEdges,
-    IReadOnlyList<SnapshotProductRepoEdge> ProductRepoEdges);
+    IReadOnlyList<SnapshotProductRepoEdge> ProductRepoEdges,
+    IReadOnlyList<OperationReceipt>? OperationReceipts = null);
+
 
 /// <summary>A <c>Memory</c> graph vertex — carries only its <c>memory_uuid</c> (LADR-02, HLD-003).</summary>
 public sealed record SnapshotVertex(Guid MemoryUuid);

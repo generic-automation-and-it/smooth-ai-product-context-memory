@@ -80,7 +80,8 @@ public static class GetMemoryVersions
                         v.Version,
                         v.IsCurrent,
                         v.Sources,
-                        v.CreatedOn)
+                        v.CreatedOn,
+                        v.BlobAddress != null)
                     {
                         Repository = group.Repo,
                         InitiativeName = initiativeName,

@@ -191,3 +191,9 @@ The wellspring illustration at the close of this README is **not** an original o
 **Robert Engels** (1866–1920), *Odin am Brunnen der Weisheit* (1903). Odin drinks from Mímisbrunnr as Mímir looks on. Published in Adolf Lange, *Deutsche Götter- und Heldensagen*, B. G. Teubner, Leipzig, 1903. Reproduced from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Odin_am_Brunnen_der_Weisheit.jpg) ([Wikipedia: Mímisbrunnr](https://en.wikipedia.org/wiki/M%C3%ADmisbrunnr)).
 
 The work is in the **public domain** in its country of origin and in jurisdictions where copyright is the author's life plus 70 years or fewer (Engels died 1920). It is **not** licensed under this project's terms; do not treat it as Smooth AI artwork or as a trademark. Local copy: [`docs/banner/odin-am-brunnen-der-weisheit.jpg`](docs/banner/odin-am-brunnen-der-weisheit.jpg).
+
+## Optional knowledge service
+
+The opt-in knowledge service provides attributed retrieval and durable learning capture. See [the service guide](docs/optional-knowledge-service/README.md). It is disabled by default.
+
+After installing its caller skill and configuring the service connection, add standing instructions to your agent's instruction file for proactive use. For Codex, use a project `AGENTS.md` or your global `~/.codex/AGENTS.md`. See [Enable proactive agent use](docs/optional-knowledge-service/OPERATIONS.md#enable-proactive-agent-use) for a copyable example and setup checks.

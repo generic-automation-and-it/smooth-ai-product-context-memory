@@ -173,3 +173,7 @@ One-liners; full detail in git history and the linked PRs/issues.
 | 2026-09-19 | **Recorded gate resolves `OPENCODE-GO-OPENAI`** (vLLM wiring kept as selectable alternative). | run 35444596583 |
 | 2026-09-19 | **Gate fallbacks retargeted to `OPENCODE-GO-OPENAI`/`glm-5.2`** (unconfigured consumers land on live provider). | PR #83 review |
 | 2026-09-19 | **Added `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`** (advisory link needs settings enablement). | this PR |
+
+## Optional knowledge service
+
+The separate KnowledgeHost is opt-in; core Application/Host remain deterministic. Service contracts and recovery rules are in `docs/optional-knowledge-service/`. Caller integration is in `.agents/skills/mimisbrunnr-knowledge-service/`. Do not run direct and service capture for the same learning; explicitly hand off ownership and reconcile pending receipts.

@@ -1,5 +1,7 @@
 # Context memory write pipeline — High-Level Design
 
+> Optional-service feature amendment: direct capture remains independent. The additive Host idempotency/CAS, read-only group lookup, evidence metadata and immutable source-attachment contracts are [HLD-008 LADR-01](../008-optional-knowledge-service/ladrs/LADR-01-additive-host-commit-and-evidence-contracts.md). Both capture modes share atomicity/redaction enforcement; this does not create a second authoritative corpus.
+
 | | |
 |---|---|
 | **Status** | Accepted; all LADR decisions implemented and verified; NFR-03 live all-outcomes evidence and NFR-05 provider telemetry remain open; NFR-02 re-evidenced 2026-09-29 under group-scoped identity |

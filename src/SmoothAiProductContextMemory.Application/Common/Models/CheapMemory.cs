@@ -40,7 +40,8 @@ public sealed record CheapMemory(
     int Version,
     bool IsCurrent,
     IReadOnlyList<SourceDocument> Sources,
-    Instant CreatedOn)
+    Instant CreatedOn,
+    bool? HasBody = null)
 {
     /// <summary>
     /// Set only when the query carries <c>productName</c>: <c>"initiative"</c> when the memory's group

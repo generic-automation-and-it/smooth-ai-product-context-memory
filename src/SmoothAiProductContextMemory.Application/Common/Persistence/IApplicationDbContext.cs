@@ -29,5 +29,7 @@ public interface IApplicationDbContext
     /// </summary>
     IQueryable<OwnedTicketIdentity> QueryOwnedTicketIdentities(IReadOnlyCollection<Guid> groupUuids);
 
+    void DiscardTrackedState();
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

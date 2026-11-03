@@ -4,6 +4,10 @@
 
 Pure domain model — entities, aggregate roots, and value objects. NodaTime supplies absolute-time value types; no I/O or framework dependencies.
 
+## Evidence metadata — October 3, 2026
+
+`SourceDocument.Evidence` is an optional versioned JSON shape, stored inside the existing immutable `sources` column. It records `reported_fact` (attributed knowledge without approval), `suggestion`, `document_approval`, `approved_intent`, `observed_implementation`, or `unknown`, with applicability, authority references/quotes, and source scope. Document/design approval does not establish approved product intent or shipped behavior. Absent metadata on legacy sources remains unknown. Memory status and evidence category are separate axes; approval alone does not establish shipped behavior. Evidence follows source provenance through ordinary reads, exports, and snapshots; attaching evidence to an equivalent claim uses a new append-only version.
+
 ## Non-Negotiables
 
 - **No outward dependencies.** Domain references no other project and no infrastructure packages (EF Core, ASP.NET, HTTP, serialization). It is the innermost Clean Architecture layer. NodaTime is permitted solely for immutable absolute-time value types (`Instant`); no clock, timezone or serializer policy lives in Domain.
@@ -37,6 +41,7 @@ they are the design, not drift.
 |:-----|:-------|:----|
 | 2026-10-14 | `ContentAddress` added as the home of the content hash/address derivation, moved out of Infrastructure's `Sha256ContentAddress` so the pure function has one name and one layer. | version-bug |
 | 2026-10-13 | Domain timestamps now use NodaTime `Instant`; no local/offset-bearing time is retained in the model. NodaTime is the pure value-type dependency exception, not an infrastructure dependency. | HLD-001 LADR-05; UTC instant write fix |
+| 2026-10-03 | Documented optional knowledge-service commit, evidence, and recovery support implemented in this branch. | optional knowledge service |
 | 2026-09-19 | Added `understanding` to well-known open kind values; no schema or closed-enum constraint introduced. Its five parts (trigger/knowledge/why/boundaries/provenance) map onto existing fields — `Description`/`Statement`/`ContentSummary`/`ValidUntil`+scope/`Sources`+`ValidFrom`+`CreatedOn` — so no column was added. | HLD-007 LADR-01, LADR-04 |
 | 2026-09-17 | Added `divergence` to well-known open kind values; no schema or closed-enum constraint introduced. | HLD-002 BR-10 closure |
 | 2026-09-13 | ADR-0001/0002/0003 deleted; exceptions section retargeted to HLD 001. | HLD-001 |

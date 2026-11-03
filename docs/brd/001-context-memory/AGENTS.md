@@ -65,6 +65,7 @@ multi-tracker in BR-04.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | Linked sibling BRD-004 optional assistance requirements without changing existing requirement numbering or accepting its unfinished implementation. | BRD-004 |
 | 2026-09-13 | Created alongside promoting the BRD from a flat file to `docs/brd/001-context-memory/`. Records the BRD/HLD authority direction, the three-place HLD reference rule, and eleven known gaps found against the braindump record. | — |
 | 2026-09-13 | Second amendment applied to the BRD: BR-10 authority ranking, BR-11 checkpoint clause, findability risk, preferences in scope, multi-tracker tickets, terseness pass on §1/§2/§7. Five of eleven gaps closed; gap list pruned to the six remaining. | — |
 | 2026-09-13 | BRD-002 recorded as extending this requirement space and owning HLD 005; three-place rule clarified for sibling-BRD-owned HLDs; BR-17 export gap marked partly answered. | BRD-002 |

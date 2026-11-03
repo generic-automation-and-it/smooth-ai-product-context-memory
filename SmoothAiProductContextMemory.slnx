@@ -5,12 +5,17 @@
     <Project Path="src/SmoothAiProductContextMemory.Infrastructure/SmoothAiProductContextMemory.Infrastructure.csproj" />
     <Project Path="src/SmoothAiProductContextMemory.Host/SmoothAiProductContextMemory.Host.csproj" />
     <Project Path="src/SmoothAiProductContextMemory.AppHost/SmoothAiProductContextMemory.AppHost.csproj" />
+    <Project Path="src/SmoothAiProductContextMemory.Knowledge/SmoothAiProductContextMemory.Knowledge.csproj" />
+    <Project Path="src/SmoothAiProductContextMemory.KnowledgeHost/SmoothAiProductContextMemory.KnowledgeHost.csproj" />
   </Folder>
   <Folder Name="/tests/TestFramework/">
     <Project Path="tests/SmoothAiProductContextMemory.TestFramework/SmoothAiProductContextMemory.TestFramework.csproj" />
     <Project Path="tests/SmoothAiProductContextMemory.TestFramework.Aspire/SmoothAiProductContextMemory.TestFramework.Aspire.csproj" />
   </Folder>
-  <Folder Name="/tests/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/SmoothAiProductContextMemory.Knowledge.ComponentTest/SmoothAiProductContextMemory.Knowledge.ComponentTest.csproj" />
+    <Project Path="tests/SmoothAiProductContextMemory.Knowledge.UnitTest/SmoothAiProductContextMemory.Knowledge.UnitTest.csproj" />
+  </Folder>
   <Folder Name="/tests/L0/">
     <Project Path="tests/SmoothAiProductContextMemory.Domain.UnitTest/SmoothAiProductContextMemory.Domain.UnitTest.csproj" />
     <Project Path="tests/SmoothAiProductContextMemory.Application.UnitTest/SmoothAiProductContextMemory.Application.UnitTest.csproj" />
@@ -65,6 +70,7 @@
   <Folder Name="/.agents/rules/skills/">
     <File Path=".agents/rules/skills/skill-secret-handling.instructions.md" />
   </Folder>
+  <Folder Name="/.agents/setup/" />
   <Folder Name="/.agents/setup/scripts/">
     <File Path=".agents/setup/scripts/agents-setup.ps1" />
     <File Path=".agents/setup/scripts/agents-setup.sh" />
