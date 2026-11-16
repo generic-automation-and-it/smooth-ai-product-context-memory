@@ -74,7 +74,10 @@ permissions:
 jobs:
   python-harnesses:
     name: Python harnesses (${{ matrix.python }})
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`: setup-python publishes 3.9 builds for 22.04 and 24.04 only, so
+    # once `ubuntu-latest` moved to 26.04 this job failed in its setup step and the 3.9 floor the
+    # skills declare stopped running at all.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
