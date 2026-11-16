@@ -26,7 +26,8 @@ relying on the well for it.
   wrongly. `--scope auto` lets the optional local decision model propose a dimension, but only a
   unanimous, above-threshold batch adopts one, and only for a group the export creates — an existing
   ticket-bound group keeps its own. Otherwise the default stands and the export says why. A dry run asks
-  nothing, and the store itself never infers or checks a dimension.
+  nothing, and the store itself never infers a dimension — it validates
+shape only (one of the four dimensions, identifier required for `program`/`customer`).
 - **A cross-group duplicate is invisible to the store.** A memory's identity is `(group, uuid)`, chosen so
   the write path needs no cross-group lock ordering. The same subject captured under a second group is a
   separate memory, not a version — the store neither detects nor merges it.

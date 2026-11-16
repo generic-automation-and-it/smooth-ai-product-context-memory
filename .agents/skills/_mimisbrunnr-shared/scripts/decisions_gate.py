@@ -745,6 +745,28 @@ def build_scope_request(state, model):
     }
 
 
+def encode_scope_request(state, model):
+    """The exact bytes `classify_scope` sends, shared with `size_guard_scope`."""
+    return json.dumps(build_scope_request(state, model), ensure_ascii=False).encode("utf-8")
+
+
+def size_guard_scope(state, model):
+    """Refuse an oversize scope request BEFORE it is sent. Never truncate to fit.
+
+    Sized on the request body `classify_scope` sends, not on the record alone:
+    the scope instructions and criteria travel with the record, mirroring `size_guard`.
+    """
+    request_text = encode_scope_request(state, model).decode("utf-8")
+    total = estimate_tokens(request_text)
+    body = len(request_text.encode("utf-8"))
+    if total > MAX_CONTEXT_TOKENS:
+        return (f"request estimates to ~{total} tokens against a {MAX_CONTEXT_TOKENS}-token context "
+                f"({len(request_text)} chars, scope question included)")
+    if body > MAX_BODY_BYTES:
+        return f"request body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
+    return None
+
+
 def classify_scope(state, settings):
     """Ask the one scope question. Returns `(dimension, probability)` or raises `GateError`.
 
@@ -752,8 +774,7 @@ def classify_scope(state, settings):
     measure the value gate's `noul` answers use, so one threshold setting applies to both — and never
     the answer's `confidence`, which calibrates the model rather than separating these records.
     """
-    body = json.dumps(build_scope_request(state, settings["model"]),
-                      ensure_ascii=False).encode("utf-8")
+    body = encode_scope_request(state, settings["model"])
     answers = _post(body, settings)
     answer = answers.get(SCOPE_QUESTION_KEY)
     if not isinstance(answer, dict) or answer.get("type") != "choice":
@@ -1448,6 +1469,11 @@ def cmd_scope(args):
 
     results = []
     for index, state in enumerate(redacted):
+        oversize = size_guard_scope(state, settings["model"])
+        if oversize:
+            results.append({"index": index, "outcome": "oversize", "detail": oversize,
+                            "dimension": None, "probability": None})
+            continue
         try:
             dimension, probability = classify_scope(state, settings)
         except GateError as exc:

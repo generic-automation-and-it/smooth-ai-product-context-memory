@@ -36,7 +36,7 @@ A client-side proposal is opt-in and fail-safe:
 ## Alternatives Considered
 
 - **Server-side inference** — rejected: it moves a judgement the database cannot express as a constraint
-  onto the request path, and the store holds no content to judge.
+  onto the request path, and judging content is the client's role, not the store's.
 - **Silent automatic assignment** — rejected: a visibility boundary nobody confirmed is the wrong kind of
   automation. The proposal is disclosed, and any disagreement leaves the default in place.
 - **Per-record dimensions** — rejected without a model change: scope is a group property, so a batch that
