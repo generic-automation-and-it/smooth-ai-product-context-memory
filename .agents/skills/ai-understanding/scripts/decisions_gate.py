@@ -5,10 +5,11 @@ Client-side only. No Host or Application change, no model in the service. The st
 anything here; this script reads a redacted record, asks a decision model whether it has value to any
 target role, and reports per-record scores that a caller may use to hold or mark a record.
 
-Two subcommands:
+Three subcommands:
 
   score   stdin JSON array of records -> per-record scores on stdout
   probe   report availability: disabled | unreachable | model-missing | ok
+  scope   stdin JSON array of records -> per-record scope dimensions on stdout
 
 Design rules that the harness pins, each of which exists because the cheaper version is wrong:
 

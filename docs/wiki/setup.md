@@ -82,7 +82,7 @@ value gate's switch does not turn this on, and a dry run asks the model nothing.
 | `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_RESULTS` | `5` | Most lexical candidates stage 2 retrieves per subject |
 
 **Where the decision settings live: in the environment, and nowhere else.** The gate and the read settings (base URL, read token) read the
-process environment only. `scripts/run.sh` adds each of the fourteen non-secret settings that is
+process environment only. `scripts/run.sh` adds each of the fifteen non-secret settings that is
 **missing** to a marked block in your shell profile (`~/.zshrc`, `~/.bashrc` or `~/.profile` by login
 shell; `MIMIS_PROFILE` names another, `MIMIS_PROFILE=off` leaves profiles alone) — **add-only**: a setting
 already exported, or assigned anywhere in the profile, is never added again and never changed, so your own
