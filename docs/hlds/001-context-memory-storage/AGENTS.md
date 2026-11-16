@@ -41,6 +41,7 @@ See [./ladrs/](./ladrs/).
 | [LADR-06](./ladrs/LADR-06-content-addressed-blob-storage.md) | Content-addressed bodies, database holds the reference | Objects are immutable; a bad write can only be orphaned |
 | [LADR-07](./ladrs/LADR-07-enforcement-tiers.md) | Constraint / mechanism / verified-soft | Tells you whether a guarantee is structural or behavioural before you rely on it |
 | [LADR-08](./ladrs/LADR-08-recall-evidence-stays-self-authored.md) | Recall evidence stays self-authored; conversational benchmarks are the wrong population | LoCoMo / LongMemEval / OmniMemEval measure dialogue turns, not distilled labelled claims — a score there is the wrong-metric defect at scale. The in-use recall-feedback signal (HLD-004) is the independence that matters |
+| [LADR-09](./ladrs/LADR-09-scope-is-declared-or-proposed.md) | Scope is declared or client-proposed; the store never infers it | `--scope auto` is client-side and only unanimous adoption applies, only to a group the export creates; never add a store-side classifier |
 
 ## Key Behaviors
 
@@ -69,6 +70,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-11-16 | LADR-09 added: scope declared or client-proposed, never store-inferred; `--scope auto` unanimous-only and create-only | LADR-09 |
 | 2026-10-02 | LADR-08's Consequences now cite each fixture's denominator at its own source (HLD-001 NFR-02: 14 memories / 11 cases; HLD-002 NFR-02: fourteen scenarios) and link the `pg_trgm` reopening threshold to the NFR that records it. No decision or figure changed. | LADR-08 |
 | 2026-10-02 | LADR-08 added: recall evidence stays self-authored — LoCoMo/LongMemEval/OmniMemEval measure dialogue turns, not distilled labelled claims; HLD-004's in-use signal is the complement. | LADR-08 |
 | 2026-10-01 | README gained a *Business Requirements Traced* table for BR-04/06/07, each split into what this design delivers and what it does not. | BR-04, BR-06, BR-07 |

@@ -20,9 +20,13 @@ relying on the well for it.
   the gate never fails open — but the rules are fixed-shape fingerprints (`AKIA…`, `gh[pousr]_…`, PEM
   blocks, `secret=`/`token:`/`password=` assignments). A bare high-entropy value, an unlabelled blob, an
   unusual vendor token format or a password in prose passes through.
-- **Scope is declared, not discovered.** Programme versus product knowledge is set on the group by the
-  caller and enforced on read (the stored value is `program`). A capture under the wrong scope dimension
-  is stored correctly and retrieved wrongly; nothing infers the right dimension for you.
+- **Scope is declared, at most proposed — and the store cannot verify it.** Programme versus product
+  knowledge is set on the group by the caller (`--scope`, default `product`) and enforced on read (the
+  stored value is `program`). A capture under the wrong scope dimension is stored correctly and retrieved
+  wrongly. `--scope auto` lets the optional local decision model propose a dimension, but only a
+  unanimous, above-threshold batch adopts one, and only for a group the export creates — an existing
+  ticket-bound group keeps its own. Otherwise the default stands and the export says why. A dry run asks
+  nothing, and the store itself never infers or checks a dimension.
 - **A cross-group duplicate is invisible to the store.** A memory's identity is `(group, uuid)`, chosen so
   the write path needs no cross-group lock ordering. The same subject captured under a second group is a
   separate memory, not a version — the store neither detects nor merges it.

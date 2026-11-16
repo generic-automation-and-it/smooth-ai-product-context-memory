@@ -54,6 +54,14 @@ who never sets it runs exactly as before, with no model installed.
 Everything is client-side. There is **no model in the Host or Application**, no server-side scoring, and
 no API change. The gate is a quality signal only: a score never changes `status`, kind, or approval.
 
+`CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED=true` enables a second, independent question: `export --scope
+auto` asks the model which visibility dimension (`product`, `program`, `customer`, `self`) the batch
+belongs to, reusing the same threshold. It adopts only a **unanimous, above-threshold** answer — one
+group carries one dimension — and otherwise keeps `product` and prints why. It applies only to a group
+the export creates; an existing ticket-bound group keeps its own dimension. `program` takes a bound
+`--initiative` as its identifier; `customer` is never adopted because no identifier is inferable. The
+value gate's switch does not turn this on, and a dry run asks the model nothing.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `CONTEXT_MEMORY_DECISIONS_ENABLED` | `false` | Feature flag. Anything but exactly `true` leaves the gate skipped |
@@ -66,6 +74,7 @@ no API change. The gate is a quality signal only: a score never changes `status`
 | `CONTEXT_MEMORY_DECISIONS_ROLES` | `product-owner,designer,developer,tester,business` | Rubric roles to ask about |
 | `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD` | `hold` | After the last attempt: `hold` (not exported) or `mark` (exported with `audience:*` tags) |
 | `CONTEXT_MEMORY_DECISIONS_TIMEOUT` | `30` | Seconds per decision request |
+| `CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED` | `false` | Separate switch for `--scope auto`: anything but exactly `true` refuses the flag. Not enabled by the value gate's switch |
 | `CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED` | `false` | Turn on stage-3 of staged dedup: a model asks, per doubtful pair, whether two statements make the same claim. Off by default (stage 2 lexical candidates are still shown, as "possible duplicate (lexical only)") |
 | `CONTEXT_MEMORY_DECISIONS_DEDUP_MIN_PROBABILITY` | `0.5` | Same-claim threshold — a pair scores **strictly above** it to be proposed as a duplicate |
 | `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_PAIRS_PER_CANDIDATE` | `3` | Most pairs stage 3 asks the model about per candidate |
