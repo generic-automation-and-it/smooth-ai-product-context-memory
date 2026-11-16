@@ -29,7 +29,8 @@ Read [`SKILL.md`](./SKILL.md) first — the five-stage write pipeline, modes, sw
 - **Env vars and who receives them.** `context_memory_read_client.py` reads only `CONTEXT_MEMORY_READ_TOKEN`
   and refuses to start if any write-token spelling is set. `context_memory_client.py` reads
   `CONTEXT_MEMORY_WRITE_TOKEN` for write routes only, loaded inside a subshell around each write-route
-  invocation. `decisions_gate.py` reads `CONTEXT_MEMORY_DECISIONS_*` and sends
+  invocation. `decisions_gate.py` reads `CONTEXT_MEMORY_DECISIONS_*` plus
+  `CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED` (scope classification, a separate switch) and sends
   `CONTEXT_MEMORY_DECISIONS_API_KEY` only as its bearer header. `CONTEXT_MEMORY_BASE_URL` is not a secret.
 
 ## Architecture Decisions
@@ -84,6 +85,7 @@ Read [`SKILL.md`](./SKILL.md) first — the five-stage write pipeline, modes, sw
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-11-16 | Gate gains `scope` subcommand: `choice` over four dimensions, same threshold, separate `CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED`; SKILL.md names three subcommands | this PR |
 | 2026-10-24 | Checked against the loaded-strings convention and **gained no `assets/`** — but the Non-Negotiable now states plainly that a local `assets/` is *allowed* here like in any skill: none exists because nothing passes the extraction threshold, not because the convention excludes this skill. `references/*.md` is agent-read prose rather than a string a script loads, and the rubric/menus are shared-script data read from the shared folder's own directory. **WET scope recorded too:** WET duplicates prose two skills *both load* — copy the bytes into each skill's own `assets/` and pin them byte-equal; it does not give every skill the same files, and no shared assets folder exists to copy from. | this PR |
 | 2026-10-22 | **The gate reads decision settings from the environment only (APPHOST LADR-007).** `CredentialLoadingTests` (four cases pinning "the gate reads the file") became `EnvironmentOnlySettingsTests` (a file never enables the gate, never supplies model/endpoint, the environment supplies every setting, importing the gate adds nothing to `os.environ`); the review-#4 case now asserts the file cannot enable the gate set or unset. Mutation-checked against the old gate: 4 fail. SKILL.md and `write-path.md` say where each setting lives; the documented write step is unchanged. 180 → 179 cases. | LADR-007 |
 | 2026-10-17 | `--product-name` now declares BOTH `(Product)-[:HAS_INITIATIVE]->(Initiative)` AND `(Product)-[:HAS_REPO]->(Repo)` when both anchors are bound; either alone attributes the memory (LADR-10), a repo conflict (`409`) is a NOTE, not a silent skip, and does not fail an export whose primary anchor already landed. The "initiative wins" heuristic is gone | — |

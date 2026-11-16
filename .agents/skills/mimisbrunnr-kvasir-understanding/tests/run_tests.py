@@ -3836,6 +3836,353 @@ def _Result(rc, out, err=""):
     return type("_Result", (), {"returncode": rc, "stdout": out, "stderr": err})()
 
 
+class ScopeDecisionsTransportTests(unittest.TestCase):
+    """`scope_decisions` alone: the note it returns decides whether the export refuses or falls back.
+
+    Stubbing it per export case asserts the string a test chose, so a change to the refusal markers or
+    the report guards would keep every export case green. These drive the real function with only its
+    transport replaced.
+    """
+
+    def _run(self, fake, candidates=None):
+        original = uc.subprocess.run
+        uc.subprocess.run = lambda *args, **kwargs: fake()
+        try:
+            return uc.scope_decisions(candidates if candidates is not None
+                                      else [{"statement": "a claim"}])
+        finally:
+            uc.subprocess.run = original
+
+    def test_a_misconfiguration_is_a_refusal_for_every_marker(self):
+        for marker in ("bad-decisions-config", "bad-decisions-url", "redactor-unavailable"):
+            with self.subTest(marker=marker):
+                verdicts, note = self._run(
+                    lambda m=marker: _Result(1, "", json.dumps({"outcome": m, "detail": "x"})))
+                self.assertIsNone(verdicts)
+                self.assertEqual(note, uc.SCOPE_REFUSED)
+
+    def test_any_other_failure_is_a_skip_with_its_detail(self):
+        verdicts, note = self._run(
+            lambda: _Result(1, "", json.dumps({"outcome": "http-500", "detail": "boom"})))
+        self.assertIsNone(verdicts)
+        self.assertIn("scope: skipped", note)
+        self.assertIn("http-500", note)
+
+    def test_a_timeout_is_a_skip_not_a_refusal(self):
+        def fake():
+            raise uc.subprocess.TimeoutExpired(cmd="gate", timeout=1)
+
+        verdicts, note = self._run(fake)
+        self.assertIsNone(verdicts)
+        self.assertNotEqual(note, uc.SCOPE_REFUSED, "a hung model must not refuse a capture")
+        self.assertIn("timed out", note)
+
+    def test_unreadable_unrecognised_and_incomplete_reports_are_skips(self):
+        cases = [
+            (lambda: _Result(0, "{not json"), "unreadable"),
+            (lambda: _Result(0, json.dumps({"outcome": "disabled", "records": []})), "unrecognised"),
+            (lambda: _Result(0, json.dumps({"outcome": "ok", "records": []})), "incomplete"),
+        ]
+        for fake, word in cases:
+            with self.subTest(expected=word):
+                verdicts, note = self._run(fake)
+                self.assertIsNone(verdicts)
+                self.assertIn(word, note)
+
+    def test_verdicts_are_returned_when_the_report_matches_the_batch(self):
+        records = [{"index": 0, "outcome": "scored", "dimension": "self", "probability": 0.9}]
+        verdicts, note = self._run(
+            lambda: _Result(0, json.dumps({"outcome": "ok", "records": records})))
+        self.assertEqual(verdicts, records)
+        self.assertEqual(note, "scope: decided")
+
+
+class ScopeAutoExportTests(unittest.TestCase):
+    """`--scope auto`: the decision gate classifies the dimension, and only a unanimous confident
+    batch adopts it — one group carries one dimension, so agreement is the precondition."""
+
+    def _export(self, argv, verdicts, *, setting="true", dryrun=False, refuse=False):
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc.gate_decisions,
+                     uc.scope_decisions)
+        sent = {"bindings": [], "calls": [], "asked": []}
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "present")
+        uc.gate_decisions = lambda c, *_a, **_k: (c, "decisions: skipped (test)")
+
+        def scope(candidates):
+            sent["asked"].append(len(candidates))
+            if refuse:
+                return None, uc.SCOPE_REFUSED
+            if verdicts is None:
+                return None, "scope: skipped (test)"
+            return verdicts, "scope: decided"
+
+        def resolve(binding, name, body, dryrun):
+            sent["bindings"].append(dict(binding))
+            if dryrun:
+                return None, "dry-run"
+            return {"groupUuid": "g-1", "created": False}, "ok"
+
+        def capture(script, args, payload):
+            sent["calls"].append(args[0])
+            if args[0] == "preflight":
+                return 0, json.dumps({"candidates": []}), ""
+            return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+        uc.scope_decisions = scope
+        uc.resolve_group = resolve
+        uc._run_capture_client = capture
+        previous = {k: os.environ.get(k) for k in
+                    ("CONTEXT_MEMORY_DECISIONS_ENABLED", uc.SCOPE_DECISIONS_ENABLED)}
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "false"
+        if setting is None:
+            os.environ.pop(uc.SCOPE_DECISIONS_ENABLED, None)
+        else:
+            os.environ[uc.SCOPE_DECISIONS_ENABLED] = setting
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+                argv_full = ["export", src, "--initiative", "Present", "--heimdallr", "false"] + argv
+                if dryrun:
+                    argv_full.append("--dryrun")
+                rc, out, err = run(argv_full)
+        finally:
+            for name, value in zip(("CONTEXT_MEMORY_DECISIONS_ENABLED", uc.SCOPE_DECISIONS_ENABLED),
+                                   previous.values()):
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client, uc.gate_decisions,
+             uc.scope_decisions) = originals
+        return rc, out, err, sent
+
+    def test_the_setting_off_refuses_auto_instead_of_defaulting_silently(self):
+        rc, _out, err, sent = self._export(["--scope", "auto"], None, setting=None)
+        self.assertEqual(rc, 1)
+        self.assertIn("REFUSED", err)
+        self.assertIn(uc.SCOPE_DECISIONS_ENABLED, err)
+        self.assertEqual(sent["bindings"], [], "a refusal must not resolve a group")
+        self.assertEqual(sent["calls"], [], "a refusal must send nothing")
+
+    def test_a_unanimous_product_batch_declares_product(self):
+        verdicts = [{"index": 0, "outcome": "scored", "dimension": "product", "probability": 0.94}]
+        rc, out, err, sent = self._export(["--scope", "auto"], verdicts)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sent["bindings"][0]["scope"], "product")
+        self.assertIn("Scope: product (auto", out)
+
+    def test_a_unanimous_program_batch_uses_the_bound_initiative_as_identifier(self):
+        verdicts = [{"index": 0, "outcome": "scored", "dimension": "program", "probability": 0.91}]
+        rc, _out, err, sent = self._export(["--scope", "auto"], verdicts)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sent["bindings"][0]["scope"], "program:Present")
+
+    def test_an_existing_group_keeps_its_own_scope_and_says_so(self):
+        """`resolve-group` returns an existing ticket-bound group without applying the supplied
+        dimension, so the report must not claim the proposal was stored."""
+        verdicts = [{"index": 0, "outcome": "scored", "dimension": "program", "probability": 0.9}]
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc.gate_decisions, uc.scope_decisions)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "present")
+        uc.gate_decisions = lambda c, *_a, **_k: (c, "decisions: skipped (test)")
+        uc.scope_decisions = lambda c: (verdicts, "scope: decided")
+        uc.resolve_group = lambda b, n, d, dryrun: (
+            {"groupUuid": "g-1", "created": False, "scopeDimension": "product"}, "ok")
+
+        def capture(script, args, payload):
+            if args[0] == "preflight":
+                return 0, json.dumps({"candidates": []}), ""
+            return 0, json.dumps({"created": 1}), ""
+
+        uc._run_capture_client = capture
+        previous = os.environ.get(uc.SCOPE_DECISIONS_ENABLED)
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "false"
+        os.environ[uc.SCOPE_DECISIONS_ENABLED] = "true"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+                rc, out, err = run(["export", src, "--initiative", "Present",
+                                    "--heimdallr", "false", "--scope", "auto"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client, uc.gate_decisions, uc.scope_decisions) = originals
+            os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "false"
+            if previous is None:
+                os.environ.pop(uc.SCOPE_DECISIONS_ENABLED, None)
+            else:
+                os.environ[uc.SCOPE_DECISIONS_ENABLED] = previous
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Scope: product (existing group", out)
+        self.assertIn("proposed program:Present", out)
+
+    def test_a_split_batch_keeps_the_default_and_states_the_split(self):
+        verdicts = [
+            {"index": 0, "outcome": "scored", "dimension": "product", "probability": 0.9},
+            {"index": 1, "outcome": "scored", "dimension": "program", "probability": 0.9},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md",
+                        "The graph store was chosen for provenance paths.\n\n"
+                        "The release plan is not shipped behaviour.")
+            original = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                        uc.resolve_group, uc._run_capture_client, uc.gate_decisions,
+                        uc.scope_decisions)
+            sent = []
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "present")
+            uc.gate_decisions = lambda c, *_a, **_k: (c, "decisions: skipped (test)")
+            uc.scope_decisions = lambda c: (verdicts, "scope: decided")
+            uc.resolve_group = lambda b, n, d, dryrun: (sent.append(dict(b)) or
+                                                        ({"groupUuid": "g-1", "created": False}, "ok"))
+
+            def capture(script, args, payload):
+                if args[0] == "preflight":
+                    return 0, json.dumps({"candidates": []}), ""
+                return 0, json.dumps({"created": 2}), ""
+
+            uc._run_capture_client = capture
+            previous = os.environ.get(uc.SCOPE_DECISIONS_ENABLED)
+            os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "false"
+            os.environ[uc.SCOPE_DECISIONS_ENABLED] = "true"
+            try:
+                rc, out, err = run(["export", src, "--initiative", "Present",
+                                    "--heimdallr", "false", "--scope", "auto"])
+            finally:
+                for name, value in zip(("gate_redaction", "gate_atomicity", "initiative_exists",
+                                        "resolve_group", "_run_capture_client", "gate_decisions",
+                                        "scope_decisions"), original):
+                    setattr(uc, name, value)
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "false"
+                if previous is None:
+                    os.environ.pop(uc.SCOPE_DECISIONS_ENABLED, None)
+                else:
+                    os.environ[uc.SCOPE_DECISIONS_ENABLED] = previous
+        self.assertEqual(rc, 0, err)
+        self.assertIsNone(sent[0]["scope"], "a split batch must not adopt either dimension")
+        self.assertIn("disagree", out)
+
+    def test_a_failed_classification_keeps_the_default(self):
+        rc, out, err, sent = self._export(["--scope", "auto"], None)
+        self.assertEqual(rc, 0, err)
+        self.assertIsNone(sent["bindings"][0]["scope"])
+        self.assertIn("Scope: product (default; auto, scope: skipped (test))", out)
+
+    def test_a_dry_run_asks_no_model(self):
+        rc, out, err, sent = self._export(["--scope", "auto"], None, dryrun=True)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sent["asked"], [], "a dry run must not spend a model call")
+        self.assertIn("decided at write time", out)
+
+    def test_import_refuses_the_write_path_value(self):
+        rc, _out, err = run(["import", "--scope", "auto"])
+        self.assertEqual(rc, 1)
+        self.assertIn("write time", err)
+
+    def test_a_misconfigured_scope_gate_refuses_the_write(self):
+        """A bad setting or an unavailable redactor is a refusal, not a silent fallback — the same
+        class the value gate refuses on, and for the same reason: 'on' must not mean 'skipped'."""
+        rc, _out, err, sent = self._export(["--scope", "auto"], None, refuse=True)
+        self.assertEqual(rc, 1)
+        self.assertIn("REFUSED", err)
+        self.assertEqual(sent["bindings"], [], "a refusal must not resolve a group")
+        self.assertEqual(sent["calls"], [])
+
+    def test_a_scope_refusal_lands_before_the_review_queue_is_written(self):
+        """The refusal message says nothing was written; a queue append after it contradicts that.
+
+        The value gate's own refusal returns before its held candidates are queued. Scope sits after
+        the value gate, so it must sit before that same queue step for the claim to stay true.
+        """
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc.gate_decisions,
+                     uc.scope_decisions, uc._queue_held)
+        queued = []
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "present")
+
+        def gate(candidates, *_args, **_kwargs):
+            candidates[-1]["_gateVerdict"] = {"scores": {}, "passingRoles": [],
+                                              "discrimination": {}}
+            return candidates[:-1], "decisions: scored (2 verdicts, 1 kept, 1 held)"
+
+        uc.gate_decisions = gate
+        uc.scope_decisions = lambda c: (None, uc.SCOPE_REFUSED)
+        uc._queue_held = lambda *a, **k: (queued.append(a[0]), True)[1]
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, p: (0, json.dumps({"candidates": []}), "")
+        previous = {k: os.environ.get(k) for k in
+                    ("CONTEXT_MEMORY_DECISIONS_ENABLED", uc.SCOPE_DECISIONS_ENABLED)}
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+        os.environ[uc.SCOPE_DECISIONS_ENABLED] = "true"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md",
+                            "The graph store was chosen for provenance paths.\n\n"
+                            "The release plan is not shipped behaviour.")
+                rc, _out, err = run(["export", src, "--initiative", "Present",
+                                     "--heimdallr", "false", "--scope", "auto"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists, uc.resolve_group,
+             uc._run_capture_client, uc.gate_decisions, uc.scope_decisions, uc._queue_held) = originals
+            for name, value in previous.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+        self.assertEqual(rc, 1)
+        self.assertIn("Nothing was written", err)
+        self.assertEqual(queued, [], "the review queue was written before the refusal claimed it was not")
+
+    def test_a_store_export_refuses_auto_because_it_already_carries_a_scope(self):
+        """Re-scoping stored records is the silent boundary move `reconcile_source_scope` refuses."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "export.json", json.dumps([
+                {"statement": "A stored claim.", "description": "Stored",
+                 "scope": "program:GF-Trio"}]))
+            previous = os.environ.get(uc.SCOPE_DECISIONS_ENABLED)
+            os.environ[uc.SCOPE_DECISIONS_ENABLED] = "true"
+            try:
+                rc, _out, err = run(["export", src, "--initiative", "Present",
+                                     "--heimdallr", "false", "--scope", "auto"])
+            finally:
+                if previous is None:
+                    os.environ.pop(uc.SCOPE_DECISIONS_ENABLED, None)
+                else:
+                    os.environ[uc.SCOPE_DECISIONS_ENABLED] = previous
+        self.assertEqual(rc, 1)
+        self.assertIn("already carries", err)
+
+    def test_an_unusable_dimension_is_never_adopted(self):
+        adopted, reason = uc.auto_scope(
+            [{"index": 0, "outcome": "scored", "dimension": "portfolio", "probability": 0.9}],
+            {"initiative": "Present"})
+        self.assertIsNone(adopted)
+        self.assertIn("no usable dimension", reason)
+
+    def test_program_without_an_initiative_keeps_the_default(self):
+        adopted, reason = uc.auto_scope(
+            [{"index": 0, "outcome": "scored", "dimension": "program", "probability": 0.9}], {})
+        self.assertIsNone(adopted)
+        self.assertIn("initiative", reason)
+
+    def test_a_failed_verdict_blocks_adoption(self):
+        """A model that could not classify one candidate cannot supply a group-wide dimension."""
+        adopted, reason = uc.auto_scope(
+            [{"index": 0, "outcome": "scored", "dimension": "product", "probability": 0.9},
+             {"index": 1, "outcome": "unreachable", "dimension": None, "probability": None}],
+            {"initiative": "Present"})
+        self.assertIsNone(adopted)
+        self.assertIn("did not classify every candidate", reason)
+
+
 class DecisionsGateDryRunAndTimeoutTests(unittest.TestCase):
     """Issue 182. A dry run scored through the gate, which spends each record's attempt budget: three
     previews exhausted it and the write kept every record unscored. A dry run now runs the gate's

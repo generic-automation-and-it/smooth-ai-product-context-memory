@@ -908,6 +908,8 @@ def query_filters(args: argparse.Namespace, all_kinds: bool) -> dict:
     tags = split_list(args.tags)
     if tags:
         filters["tags"] = tags
+    if args.scope == SCOPE_AUTO:
+        raise ValueError("`--scope auto` is decided at write time; `import` reads a declared dimension")
     if args.scope:
         dimension, _, identifier = args.scope.partition(":")
         filters["scopeDimension"] = dimension
@@ -1199,6 +1201,15 @@ def snapshot_for(budget: Path, now: dt.datetime) -> Path:
         stem = stem[: -len(marker)]
     return budget.with_name(f"{stem}-{stamp}-decisions-ledger.json")
 DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
+# Scope classification is a separate switch from the value gate: a visibility boundary is a
+# different risk from a role score, and the export may want one without the other.
+SCOPE_DECISIONS_ENABLED = "CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED"
+# The reserved `--scope` value that asks the decision gate to judge the dimension. No store
+# dimension may be spelled `auto`, so the two can never be confused.
+SCOPE_AUTO = "auto"
+# The one note `scope_decisions` returns for a refusal rather than a fallback. A bad setting or an
+# unavailable redactor is a misconfiguration, not a decision model that is down.
+SCOPE_REFUSED = "scope: refused"
 # The one note `gate_decisions` returns for a refusal rather than a skip. It is a named constant because
 # `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the
 # report and let the export proceed was a message contradicting what the process then did.
@@ -1519,6 +1530,75 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
     return survivors, note
 
 
+def scope_decisions(candidates: list[dict]) -> tuple[list[dict] | None, str]:
+    """Ask the decision gate to classify each candidate's scope dimension.
+
+    Returns `(verdicts, note)`. `None` means the export keeps the default and discloses why: a
+    visibility boundary the model could not judge is never a reason to refuse a capture, and a failed
+    question is never read as `product`. The gate redacts first, so no unscrubbed content is sent.
+    """
+    if not DECISIONS_GATE.is_file():
+        return None, "scope: skipped (gate script missing)"
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(DECISIONS_GATE), "scope"],
+            input=json.dumps(candidates), capture_output=True, text=True, encoding="utf-8",
+            timeout=GATE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"scope: skipped (gate timed out after {GATE_TIMEOUT_SECONDS}s)"
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or "no detail"
+        # A bad setting or an unavailable redactor is the value gate's refusal class too: it would
+        # otherwise read as "classification is on" while every record silently fell back.
+        if ('"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail
+                or '"redactor-unavailable"' in detail):
+            return None, SCOPE_REFUSED
+        return None, f"scope: skipped ({detail})"
+    try:
+        report = json.loads(proc.stdout)
+    except ValueError:
+        return None, "scope: skipped (unreadable output)"
+    if not isinstance(report, dict) or report.get("outcome") != "ok":
+        return None, "scope: skipped (unrecognised report)"
+    verdicts = report.get("records")
+    if not isinstance(verdicts, list) or len(verdicts) != len(candidates):
+        return None, "scope: skipped (incomplete report)"
+    return verdicts, "scope: decided"
+
+
+def auto_scope(verdicts: list[dict], binding: dict) -> tuple[str | None, str]:
+    """The dimension a batch yields, or None with the reason no dimension was adopted.
+
+    Scope is a group property: one group carries one dimension, so a batch whose candidates disagree
+    cannot be written under either answer. Only a unanimous verdict adopts; anything else leaves the
+    caller to keep `product` and disclose. `program` takes the bound initiative as its identifier
+    because the store refuses programme scope without one, and `customer` has no inferable identifier.
+    """
+    if not verdicts:
+        return None, "no candidates to classify"
+    dimensions = []
+    for verdict in verdicts:
+        if not isinstance(verdict, dict) or verdict.get("outcome") != "scored":
+            return None, "the model did not classify every candidate"
+        dimensions.append(verdict.get("dimension"))
+    unique = set(dimensions)
+    if len(unique) != 1:
+        counts = ", ".join(f"{dimensions.count(d)} {d}" for d in sorted(unique, key=str))
+        return None, f"candidates disagree ({counts})"
+    dimension = unique.pop()
+    if dimension not in ("product", "program", "customer", "self"):
+        return None, "the model returned no usable dimension"
+    if dimension == "program":
+        initiative = binding.get("initiative")
+        if not initiative or initiative == "to-be-decided":
+            return None, "program scope needs a bound initiative for its identifier"
+        return f"program:{initiative}", "unanimous"
+    if dimension == "customer":
+        return None, "customer scope needs an identifier this export cannot infer"
+    return dimension, "unanimous"
+
+
 def ticket_inputs(values: list[str], repository: str | None) -> list[dict]:
     """`--tickets` entries into the resolve-group shape: `#12`, `github:12` or `provider:key`.
 
@@ -1593,6 +1673,25 @@ def _group_initiative(group: dict) -> str | None:
         return None
     got = group.get("initiativeName", group.get("InitiativeName", group.get("initiative")))
     return got if isinstance(got, str) and got else None
+
+
+def _group_scope(group: dict) -> str | None:
+    """The resolved group's scope as `dimension[:identifier]`, or None when absent or unusable.
+
+    The reply is the authority on what the group actually carries: an existing ticket-bound group is
+    returned without the supplied dimension being applied, so the export cannot assume its own
+    `binding['scope']` is what was stored.
+    """
+    if not isinstance(group, dict):
+        return None
+    dimension = group.get("scopeDimension", group.get("ScopeDimension", group.get("scope_dimension")))
+    if not isinstance(dimension, str) or not dimension:
+        return None
+    identifier = group.get("scopeIdentifier",
+                           group.get("ScopeIdentifier", group.get("scope_identifier")))
+    if isinstance(identifier, str) and identifier:
+        return f"{dimension}:{identifier}"
+    return dimension
 
 
 def initiative_mismatch_refusal(binding: dict, group: dict, initiative_source: str | None,
@@ -2378,6 +2477,21 @@ def cmd_export(args: argparse.Namespace) -> int:
     }
     initiative_source = (INITIATIVE_SOURCE_FLAG if args.initiative else
                          INITIATIVE_SOURCE_DUMP if recorded.get("initiative") else None)
+    scope_auto = binding["scope"] == SCOPE_AUTO
+    # The setting is the gate's own switch, read here the way `gate_decisions` reads the value gate's.
+    # An explicit `auto` that silently fell back to `product` would be a visibility boundary nobody
+    # chose, so it is a refusal rather than a default.
+    if scope_auto and os.environ.get(SCOPE_DECISIONS_ENABLED, "").lower() != "true":
+        print(f"REFUSED: --scope auto needs {SCOPE_DECISIONS_ENABLED}=true; without it the dimension "
+              "would come from the default. Nothing was written.", file=sys.stderr)
+        return 1
+    if scope_auto and source_kind == "store-export":
+        # A store export already carries each record's own scope, and re-scoping those is exactly the
+        # silent boundary move `reconcile_source_scope` refuses (issue 179). `auto` classifies new
+        # session material; it never rewrites a stored dimension.
+        print("REFUSED: `--scope auto` classifies new session material; a store export already carries "
+              "its records' scope. Nothing was written.", file=sys.stderr)
+        return 1
     if heimdallr_enabled(args) and (not binding["tickets"] or not binding["repository"]
                                     or not binding["initiative"]):
         scan = heimdallr_scan()
@@ -2580,6 +2694,40 @@ def cmd_export(args: argparse.Namespace) -> int:
         print(render_asset("gate-refused-export.md"), file=sys.stderr)
         return 1
 
+    # Scope classification sits after the value gate and before the held-verdict queue: a scope
+    # refusal must not leave queue entries behind while its message says nothing was written, and the
+    # dimension must be bound before the group is resolved.
+    scope_auto_adopted = None
+    scope_auto_reason = None
+    scope_auto_verdicts = None
+    if scope_auto:
+        if not args.write:
+            # A dry run probes rather than scores, the same rule the value gate follows: asking the
+            # model here would spend a call the write does not need, and the preview would show a
+            # dimension nobody had confirmed yet.
+            binding["scope"] = None
+            print("Scope: auto — decided at write time; a dry run does not ask the model. "
+                  "The default (product) applies if the model is unavailable.")
+        elif not clean:
+            binding["scope"] = None
+            scope_auto_reason = "no clean candidates to classify"
+        else:
+            # `clean` is the value gate's survivors. Held candidates are persisted into the same group
+            # and inherit its dimension, so they do not get a vote on it.
+            verdicts, scope_note = scope_decisions(
+                [dict(c, group={key: binding.get(key)
+                                for key in ("repository", "scope", "initiative", "tickets")})
+                 for c in clean])
+            scope_auto_verdicts = verdicts
+            scope_auto_adopted, scope_auto_reason = (
+                (None, scope_note) if verdicts is None else auto_scope(verdicts, binding))
+            binding["scope"] = scope_auto_adopted
+
+    if scope_auto_reason == SCOPE_REFUSED:
+        print("REFUSED: the scope decision gate refused (a bad setting or an unavailable redactor). "
+              "Nothing was written.", file=sys.stderr)
+        return 1
+
     # The gate's below-threshold holds, under `hold`, are held candidates too and go to the same queue.
     for candidate, result in held_verdicts:
         evidence = {
@@ -2639,7 +2787,6 @@ def cmd_export(args: argparse.Namespace) -> int:
             return 1
         print("No clean candidates: every candidate was held back. Resolving the group to persist "
               f"{len(persistable)} held as Status=proposed; nothing is approved past the flag.")
-
     group, group_state = resolve_group(binding, args.name, args.body, dryrun=not args.write)
     if args.write:
         if group is None:
@@ -2656,6 +2803,24 @@ def cmd_export(args: argparse.Namespace) -> int:
         if mismatch is not None:
             print(mismatch, file=sys.stderr)
             return 1
+        if scope_auto:
+            # The reply is the authority: `resolve-group` returns an existing ticket-bound group
+            # without applying a supplied dimension, so the export prints what was stored, not what
+            # it proposed.
+            stored = _group_scope(group)
+            basis = (f"unanimous across {len(scope_auto_verdicts)} candidate(s)"
+                     if scope_auto_adopted else scope_auto_reason)
+            if stored and (stored == scope_auto_adopted or _group_created(group)):
+                print(f"Scope: {stored} (auto, {basis}).")
+            elif stored:
+                print(f"Scope: {stored} (existing group; --scope auto proposed "
+                      f"{scope_auto_adopted or 'product'}, and an existing group keeps its scope "
+                      "— use update-group to change it).")
+            else:
+                if scope_auto_adopted:
+                    print(f"Scope: {scope_auto_adopted} (auto, {basis}).")
+                else:
+                    print(f"Scope: product (default; auto, {basis}).")
     else:
         group_uuid = None
         print(f"Group: would {'resolve or create' if binding['tickets'] else 'create'} for "
@@ -3702,7 +3867,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                           "to its initiatives and repos and returns the memories they carry. The "
                           "product must already be registered (upsert-product-name) — an unknown "
                           "one is a 404 naming it, never a silent empty.")
-    imp.add_argument("--scope", help="scope[:identifier], e.g. product:context-memory.")
+    imp.add_argument("--scope", help="scope[:identifier], e.g. product:context-memory; 'auto' is a "
+                                     "write-path value and is refused here.")
     imp.add_argument("--tags", help="Comma-separated tags to match on the memory.")
     imp.add_argument("--query", help="Free text: stemmed AND-of-lexemes, so one or two words, "
                                      "not a sentence.")
@@ -3746,7 +3912,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                           "omitted, so a re-export reuses one group.")
     exp.add_argument("--tags", help="Comma-separated tags/facets to bind.")
     exp.add_argument("--repository", help="Repository to associate with the group.")
-    exp.add_argument("--scope", help="scope:identifier, e.g. product:invitations.")
+    exp.add_argument("--scope", help="scope:identifier, e.g. product:context-memory, or 'auto' to let "
+                                     "the decision gate classify it (needs "
+                                     "CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED=true).")
     exp.add_argument("--initiative", help="Initiative the group belongs to; must already exist.")
     exp.add_argument("--product-name", "--productname", dest="product_name",
                      help="Declare the product's graph edges for the anchors this export binds: "
@@ -3780,7 +3948,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     for flag, help_text in (("tickets", "Recorded as structured metadata for a later export."),
                             ("tags", "Recorded as structured metadata for a later export."),
                             ("repository", "Recorded as structured metadata for a later export."),
-                            ("scope", "scope:identifier."),
+                            ("scope", "scope:identifier, or 'auto' to record that the export should "
+                                      "classify it."),
                             ("initiative", "Recorded as structured metadata for a later export.")):
         dump.add_argument(f"--{flag}", help=help_text)
     dump.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",

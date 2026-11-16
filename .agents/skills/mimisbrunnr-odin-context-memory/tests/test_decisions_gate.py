@@ -138,8 +138,17 @@ class StubHandler(http.server.BaseHTTPRequestHandler):
         self.server.requests.append(body)
         probabilities = self.server.probabilities
         answers = {}
-        for role in body.get("questions", {}):
-            answers[role] = {"noul": probabilities.get(role, 0.0)}
+        for name, question in body.get("questions", {}).items():
+            if isinstance(question, dict) and question.get("type") == "choice":
+                # A `choice` question is answered as a distribution over its criteria keys; the
+                # stub's declared distribution is what a case asks for, and the chosen key is its
+                # maximum unless the case names one explicitly.
+                distribution = self.server.choice_probabilities
+                chosen = self.server.choice or max(distribution, key=distribution.get)
+                answers[name] = {"type": "choice", "choice": chosen,
+                                 "probabilities": dict(distribution), "confidence": 0.9}
+            else:
+                answers[name] = {"noul": probabilities.get(name, 0.0)}
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -163,6 +172,9 @@ class Stub:
         # reading a stale default — which is exactly what happened: every case answered 0.0 and the
         # whole pass rule looked broken.
         self.server.probabilities = {}
+        self.server.choice = None
+        self.server.choice_probabilities = {"product": 0.25, "program": 0.25,
+                                            "customer": 0.25, "self": 0.25}
         self.server.override = None
         self.server.requests = []
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -175,6 +187,22 @@ class Stub:
     @probabilities.setter
     def probabilities(self, value):
         self.server.probabilities = value
+
+    @property
+    def choice(self):
+        return self.server.choice
+
+    @choice.setter
+    def choice(self, value):
+        self.server.choice = value
+
+    @property
+    def choice_probabilities(self):
+        return self.server.choice_probabilities
+
+    @choice_probabilities.setter
+    def choice_probabilities(self, value):
+        self.server.choice_probabilities = value
 
     @property
     def requests(self):
@@ -206,6 +234,10 @@ def gate_subprocess_env(env_extra=None):
     """The environment every gate subprocess in this suite runs under."""
     env = os.environ.copy()
     env.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+    # The scope switch is not one of the `CONTEXT_MEMORY_DECISIONS_*` names, so the prefix sweep
+    # below would miss it and an operator who enabled scope classification on the machine would
+    # decide whether this suite's scope cases run.
+    env.pop("CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED", None)
     for key in list(env):
         if key.startswith("CONTEXT_MEMORY_DECISIONS_"):
             env.pop(key)
@@ -267,7 +299,9 @@ class GateTestCase(unittest.TestCase):
         # an operator's exported `CONTEXT_MEMORY_DECISIONS_*` decided what they returned — subprocess
         # cases were isolated by `run_gate`, these were not (issue 188; 179 and 182 before it). Every
         # case starts with none set; a case that wants one passes it explicitly.
-        isolated = {k: v for k, v in os.environ.items() if not k.startswith("CONTEXT_MEMORY_DECISIONS_")}
+        isolated = {k: v for k, v in os.environ.items()
+                    if not k.startswith("CONTEXT_MEMORY_DECISIONS_")
+                    and k != "CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED"}
         patcher = mock.patch.dict(os.environ, isolated, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -289,6 +323,13 @@ class GateTestCase(unittest.TestCase):
         proc = run_gate(args, payload, self.gate_env(**overrides))
         return proc, (json.loads(proc.stdout) if proc.stdout.strip() else None)
 
+    def scope(self, records=None, **overrides):
+        payload = json.dumps(records if records is not None else [RECORD])
+        env = {"CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED": "true"}
+        env.update(overrides)
+        proc = run_gate(["scope"], payload, self.gate_env(**env))
+        return proc, (json.loads(proc.stdout) if proc.stdout.strip() else None)
+
 
 class DisabledTests(GateTestCase):
     def test_disabled_makes_no_request(self):
@@ -308,6 +349,92 @@ class DisabledTests(GateTestCase):
         proc = run_gate(["probe"], "", {"CONTEXT_MEMORY_DECISIONS_ENABLED": "false"})
         self.assertEqual(json.loads(proc.stdout)["outcome"], "disabled")
         self.assertEqual(self.stub.requests, [])
+
+
+class ScopeQuestionTests(GateTestCase):
+    """The scope question is a different risk from role value, so it is a separate switch."""
+
+    def test_scope_is_off_by_default(self):
+        proc, report = self.scope(CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED="")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(report["outcome"], "disabled")
+        self.assertEqual(self.stub.requests, [], "a disabled scope question must not reach the model")
+
+    def test_one_request_carries_one_choice_over_the_four_dimensions(self):
+        self.stub.choice = "product"
+        self.stub.choice_probabilities = {"product": 0.9, "program": 0.05,
+                                          "customer": 0.03, "self": 0.02}
+        self.scope()
+        self.assertEqual(len(self.stub.requests), 1, "one request per record")
+        questions = self.stub.requests[0]["questions"]
+        self.assertEqual(list(questions), ["scope"])
+        question = questions["scope"]
+        self.assertEqual(question["type"], "choice")
+        self.assertEqual(sorted(question["criteria"]), ["customer", "product", "program", "self"])
+
+    def test_the_chosen_dimension_and_its_probability_are_reported(self):
+        self.stub.choice = "program"
+        self.stub.choice_probabilities = {"product": 0.02, "program": 0.93,
+                                          "customer": 0.03, "self": 0.02}
+        _, report = self.scope()
+        record = report["records"][0]
+        self.assertEqual(record["outcome"], "scored")
+        self.assertEqual(record["dimension"], "program")
+        self.assertAlmostEqual(record["probability"], 0.93)
+
+    def test_a_below_threshold_answer_keeps_no_dimension_and_names_what_it_nearly_chose(self):
+        self.stub.choice = "program"
+        self.stub.choice_probabilities = {"product": 0.35, "program": 0.4,
+                                          "customer": 0.15, "self": 0.1}
+        _, report = self.scope()
+        record = report["records"][0]
+        self.assertEqual(record["outcome"], "below-threshold")
+        self.assertIsNone(record["dimension"])
+        self.assertEqual(record["candidate"], "program")
+
+    def test_an_answer_missing_a_dimension_is_refused_not_read_as_a_choice(self):
+        self.stub.choice = "product"
+        self.stub.choice_probabilities = {"product": 0.7, "program": 0.2, "customer": 0.1}
+        _, report = self.scope()
+        self.assertEqual(report["records"][0]["outcome"], "bad-response")
+        self.assertIsNone(report["records"][0]["dimension"])
+
+    def test_probabilities_that_do_not_sum_to_one_are_refused(self):
+        self.stub.choice = "product"
+        self.stub.choice_probabilities = {"product": 0.9, "program": 0.9,
+                                          "customer": 0.0, "self": 0.0}
+        _, report = self.scope()
+        self.assertEqual(report["records"][0]["outcome"], "bad-response")
+
+    def test_an_undeclared_choice_is_refused(self):
+        self.stub.choice = "portfolio"
+        self.stub.choice_probabilities = {"product": 0.9, "program": 0.05,
+                                          "customer": 0.03, "self": 0.02}
+        _, report = self.scope()
+        self.assertEqual(report["records"][0]["outcome"], "bad-response")
+
+    def test_a_failed_question_is_that_records_outcome_not_a_batch_failure(self):
+        self.stub.override = "no-answers"
+        proc, report = self.scope()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(report["records"][0]["outcome"], "bad-response")
+
+    def test_a_probability_exactly_at_the_threshold_is_not_adopted(self):
+        """The value gate passes only strictly above the threshold; scope adopts by the same rule."""
+        self.stub.choice = "program"
+        self.stub.choice_probabilities = {"product": 0.15, "program": 0.85,
+                                          "customer": 0.0, "self": 0.0}
+        _, report = self.scope()
+        record = report["records"][0]
+        self.assertEqual(record["outcome"], "below-threshold")
+        self.assertIsNone(record["dimension"])
+        self.assertAlmostEqual(record["probability"], 0.85)
+
+    def test_a_bad_endpoint_refuses_before_any_record(self):
+        """Configuration is refused once, up front — not once per record as a plausible outcome."""
+        proc, _report = self.scope(CONTEXT_MEMORY_DECISIONS_BASE_URL="not a url")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("bad-decisions-url", proc.stderr)
 
 
 class PassRuleTests(GateTestCase):
