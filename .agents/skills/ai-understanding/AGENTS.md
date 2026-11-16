@@ -21,7 +21,8 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
   byte-identical copies of `_mimisbrunnr-shared/scripts/`** — never imported, so the skill runs where no
   `mimisbrunnr-*` is installed; the repository's `tests/parity_decisions_gate.py` holds them equal (no `tests/` ships in an installed copy). **`scripts/assets/` is part of that copy**: the gate loads its
   messages from it, so the parity test compares the asset file set and every byte. `gate_decisions.py` is
-  owned here. The gate reads `CONTEXT_MEMORY_DECISIONS_*` from the
+  owned here. The gate reads `CONTEXT_MEMORY_DECISIONS_*` (and, for its `scope` subcommand, the
+  separate `CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED`) from the
   environment only — never a file — and no store token; `CONTEXT_MEMORY_DECISIONS_API_KEY` reaches only
   `decisions_gate.py`, as the bearer header.
 
@@ -141,6 +142,7 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-11-16 | WET `decisions_gate.py` re-copied with the `scope` subcommand (unused here) to keep parity; env-var sentence names the scope switch | this PR |
 | 2026-10-31 | Durability-guard test asserts on the `unpublished` section only; the whole-output check failed once the fixture date aged past the 30-day staleness flag | #304 |
 | 2026-10-24 | **`scripts/assets/` joined the WET copy set.** The shared gate loads two messages from `scripts/assets/`, so this skill's copy carries the folder and `parity_decisions_gate.py` compares the file set and every byte — a gate copied without its prose is not the same gate | this PR |
 | 2026-10-22 | **Decision settings are environment-only (APPHOST LADR-007).** The WET `decisions_gate.py` re-copied from the shared original (file loader removed); `gate_decisions._flag_set_nowhere` checks the environment only. `gate_behavior.py`: the two "file-only settings enable" cases replaced by one asserting a credential file naming a live stub leaves the gate `not-configured` with zero requests. | LADR-007 |

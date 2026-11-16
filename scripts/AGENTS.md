@@ -202,6 +202,7 @@ The ignore-refusal coverage is **three** cases, because `check-ignore` gives two
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-11-16 | Both launchers publish `CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED=false` beside the value gate's switch; launcher harness asserts the default | this PR |
 | 2026-10-31 | Controller `--restart unless-stopped` in both launchers; workloads deliberately policy-free; replace path stops a `restarting` controller | — |
 | 2026-10-24 | `_mimisbrunnr-shared/scripts/assets/` ships with the shared folder, which the installer refreshes whole and the packer excludes only `tests/`/`__pycache__` from — no prune-list change, recorded so a future "assets are per-skill only" reading does not delete it | this PR |
 | 2026-10-24 | The installer harness's "an installed skill keeps its runtime files" case now also asserts a `mimisbrunnr-kvasir-understanding/assets/*.md` file survives an install, so the prune list stays proven against a *script-loaded* asset and not only a template | this PR |

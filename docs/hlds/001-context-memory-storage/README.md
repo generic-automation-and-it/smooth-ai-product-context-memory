@@ -138,6 +138,7 @@ LADRs 01–06 are strategic (*what* and *why*); 07 is tactical (*how*). See [`./
 | [LADR-06](./ladrs/LADR-06-content-addressed-blob-storage.md) | Bodies in content-addressed object storage; database holds the reference | Accepted |
 | [LADR-07](./ladrs/LADR-07-enforcement-tiers.md) | Three enforcement tiers — constraint, mechanism, verified-soft | Accepted |
 | [LADR-08](./ladrs/LADR-08-recall-evidence-stays-self-authored.md) | Recall evidence stays self-authored; conversational benchmarks are the wrong population | Accepted |
+| [LADR-09](./ladrs/LADR-09-scope-is-declared-or-proposed.md) | Scope is declared or client-proposed; the store never infers it | Accepted |
 
 ## Non-Functional Requirements
 

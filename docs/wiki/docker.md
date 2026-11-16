@@ -9,7 +9,7 @@ Docker Desktop group.
 ## Release Controller
 
 The additional image is `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory-apphost`.
-It packages live Aspire 13.5.3 AppHost, DCP, dashboard, .NET runtime, and Docker client. It starts sibling containers through the external engine, not Docker-in-Docker. No host .NET installation or source checkout is required for a published controller image.
+It packages live Aspire 13.6.5 AppHost, DCP, dashboard, .NET runtime, and Docker client. It starts sibling containers through the external engine, not Docker-in-Docker. No host .NET installation or source checkout is required for a published controller image.
 
 **Security:** engine socket access grants administrative control with the engine user's privileges, potentially host root. A read-only socket mount does not make API calls read-only. Never expose an unauthenticated engine API. Context API Bearer tokens separate read and write capabilities but are not multi-user authorization; keep API and Seq on private interfaces and a protected network.
 

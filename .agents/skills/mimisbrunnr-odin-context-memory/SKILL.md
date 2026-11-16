@@ -373,7 +373,7 @@ a secret sits on disk; it is never how personal data is removed — that happene
 | `authority.py` | `python3 .../mimisbrunnr-odin-context-memory/scripts/authority.py` | 3 (authority resolution) | Converts a stated-authority judgement into one or two ordered version writes. Existing-winner cases record the losing candidate as history, then restore the winner as current in the same transaction. |
 | `divergence.py` | `python3 .../mimisbrunnr-odin-context-memory/scripts/divergence.py` | 3 (conflict composition) | Converts an explicit same-subject genuine-conflict judgement into a separately identified claim, proposed divergence memory and two contradiction links; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
 | `near_miss_tags.py` | `python3 .../_mimisbrunnr-shared/scripts/near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
-| `decisions_gate.py` | `python3 .../_mimisbrunnr-shared/scripts/decisions_gate.py score [--state-file PATH] [--snapshot-file PATH] < <batch-file>` | Optional value gate | Scores each record for value to each target role via a **local decision model**. **Off by default** (`CONTEXT_MEMORY_DECISIONS_ENABLED=false`). Carries no model in the Host or Application — everything here is client-side. Two subcommands: `score` and `probe`. See the Value Gate below. |
+| `decisions_gate.py` | `python3 .../_mimisbrunnr-shared/scripts/decisions_gate.py score [--state-file PATH] [--snapshot-file PATH] < <batch-file>` | Optional value gate | Scores each record for value to each target role via a **local decision model**. **Off by default** (`CONTEXT_MEMORY_DECISIONS_ENABLED=false`). Carries no model in the Host or Application — everything here is client-side. Three subcommands: `score`, `probe` and `scope` (visibility-dimension classification, separately switched). See the Value Gate below. |
 
 ### Value Gate (optional, off by default)
 
@@ -386,6 +386,12 @@ scored independently, which is what makes "valuable to at least one role" expres
 the same roles makes the probabilities **sum to 1**, so a record valuable to *both* Developer and Tester
 scores about 0.45 each and fails at a 0.5 bar — splitting one useful record in half and calling it
 worthless. `decisions_rubric.json` holds one definition per role and is **shared by every skill**.
+
+**Scope classification is a separate `choice` question behind a separate switch.** `scope` asks one
+`choice` over `product`/`program`/`customer`/`self` per record and applies the same threshold; it is on
+only with `CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED=true`, which the value gate's switch does not set. A
+`choice` is right here because the dimensions are mutually exclusive — unlike roles — and a dimension is
+adopted only when every candidate agrees. The store itself still never infers one.
 
 **Scores are a quality signal, never authority.** They never change `status`, kind, or approval. They
 cannot promote a `proposed` record, and a passing score is not an endorsement.

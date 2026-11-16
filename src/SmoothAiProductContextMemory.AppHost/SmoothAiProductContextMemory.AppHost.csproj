@@ -1,10 +1,14 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.5.3">
+<Project Sdk="Aspire.AppHost.Sdk/13.6.5">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>SmoothAiProductContextMemory.AppHost</RootNamespace>
     <IsAspireHost>true</IsAspireHost>
+    <!-- NuGet-restored orchestration dependencies: Dockerfile.apphost copies the DCP and dashboard
+         tools from the package cache, so the 13.6 CLI bundle is deliberately not used. -->
+    <AspireUseCliBundle>false</AspireUseCliBundle>
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
     <UserSecretsId>smooth-project-memory-host</UserSecretsId>
   </PropertyGroup>
 

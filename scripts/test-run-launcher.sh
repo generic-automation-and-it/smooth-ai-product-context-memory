@@ -265,6 +265,7 @@ fi
 home_profile="$scratch/home/.zshrc"
 
 for key in CONTEXT_MEMORY_BASE_URL CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_DECISIONS_ENABLED \
+  CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED \
   CONTEXT_MEMORY_DECISIONS_BASE_URL CONTEXT_MEMORY_DECISIONS_MODEL CONTEXT_MEMORY_DECISIONS_TIMEOUT; do
   if [ "$(grep -c "^export $key=" "$home_profile" 2>/dev/null)" = "1" ]; then
     ok "the profile exports $key exactly once"
@@ -294,6 +295,14 @@ if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED='false'$" "$home_profile"; 
   ok "the decision gate defaults to disabled"
 else
   no "the decision gate defaults to disabled" "$(grep DECISIONS_ENABLED "$home_profile")"
+fi
+
+# Scope classification is its own switch and defaults off the same way: enabled silently, a launcher
+# would make `--scope auto` ask the model on a machine that never opted in.
+if grep -q "^export CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED='false'$" "$home_profile"; then
+  ok "scope classification defaults to disabled"
+else
+  no "scope classification defaults to disabled" "$(grep SCOPE_DECISIONS_ENABLED "$home_profile")"
 fi
 
 # The read token in the profile is the one the Host is started with — a mismatch is a 403 on every read.

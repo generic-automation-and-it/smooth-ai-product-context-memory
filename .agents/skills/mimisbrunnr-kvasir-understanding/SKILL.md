@@ -226,7 +226,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   export [<input> | --input <path>] [--dryrun] [--all] [--nomarker] [--session ID] \
-  [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
+  [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id|auto] \
   [--initiative NAME] [--product-name NAME] [--name NAME] [--body TEXT] [--heimdallr true] \
   [--reference-tickets TICKET,...]
 ```
@@ -240,6 +240,18 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   so; with `--dryrun` beside it, `--dryrun` wins.
 - A default export drops the session marker's ids and reports `Boundary:`; `export --all`
   ignores the marker. A candidate changing an excluded item is kept as a supersession.
+- **`--scope auto` asks the decision model to classify the dimension.** With
+  `CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED=true`, each candidate gets one `choice` question over
+  `product`/`program`/`customer`/`self` after the value gate and **before** the group is resolved.
+  Scope is a group property, so only a **unanimous, above-threshold** verdict adopts: a split batch
+  keeps `product` and prints the split; `program` takes the bound `--initiative` as its identifier and
+  `customer` is never adopted because no identifier is inferable. Adoption applies only to a group the
+  export creates — `resolve-group` returns an existing ticket-bound group unchanged, and the export
+  prints its stored scope with a note that the proposal was not applied. A failed question falls back
+  with the reason printed, never a refusal. A dry run asks nothing. Without the setting, `--scope auto`
+  is **refused** — a silent fallback to `product` would be a visibility boundary nobody chose. With no
+  `--scope` at all, the group binds the store default, `product`; that default is never printed as a
+  choice because nobody made one.
 - **Source dates become UTC instants on write.** Date-only `learned`/`updated` validity is sent as midnight UTC (`T00:00:00Z`), not interpreted in the machine timezone. Local load preserves the source date. Explicit timestamp strings retain fractional precision.
 - **Dedup is exact-subject only.** A candidate whose subject already exists in the group becomes a
   version bump; nothing else is matched, and no link is derived (`links: []`). **Before writing**,

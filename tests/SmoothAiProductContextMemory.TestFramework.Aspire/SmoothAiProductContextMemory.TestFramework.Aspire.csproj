@@ -1,10 +1,13 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.5.3">
+<Project Sdk="Aspire.AppHost.Sdk/13.6.5">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>SmoothAiProductContextMemory.TestFramework.Aspire</RootNamespace>
     <IsAspireHost>true</IsAspireHost>
     <IsTestProject>false</IsTestProject>
+    <!-- Same choice as the product AppHost: orchestration comes from NuGet, not the 13.6 CLI bundle. -->
+    <AspireUseCliBundle>false</AspireUseCliBundle>
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

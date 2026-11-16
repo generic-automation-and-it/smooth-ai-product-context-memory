@@ -5,11 +5,15 @@ Recorded at HLD-003 foundation adoption. Update this file whenever either versio
 | | |
 |---|---|
 | **Image** | `docker.io/apache/age:release_PG17_1.7.0` |
-| **Postgres version** | 17 — 17.11 inside the AGE image (Aspire 13.5.3 default is `library/postgres:17.7`; same major, volume compatible) |
+| **Postgres version** | 17 — 17.11 inside the AGE image. Both hosts pin this image explicitly; Aspire 13.6.5's own default is `library/postgres:18.3`, a **different major**, so the explicit pin is what keeps the pairing and the named volumes compatible |
 | **AGE extension** | 1.7.0 |
 | **Supported AGE ceiling (upstream)** | Postgres 11–18 for released tags — `release_PG18_1.8.0` and `release_PG18_1.7.0` both published; PG19 exists only as `dev_snapshot_PG19`. Re-checked 2026-09-13. |
 | **Newest PG17 release tag** | `release_PG17_1.7.0` — the pin *is* the newest PG17 release (only `release_PG17_1.6.0` precedes it), so there is no newer minor to move to |
 | **Hosts** | Dev AppHost (`mimisbrunnr-postgres`) and test Aspire (`mimisbrunnr-testcontainer-postgres`) |
+
+**The explicit `.WithImage(...)` pin is load-bearing.** The Aspire hosting package's default image
+moved from the 17 line (13.5.3) to `library/postgres:18.3` (13.6.5), so a resource that dropped the pin
+would silently change major and stop matching the existing named volume.
 
 ## Pre-upgrade check
 

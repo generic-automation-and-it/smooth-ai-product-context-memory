@@ -86,6 +86,8 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-11-16 | Aspire 13.5.3 → 13.6.5 (CVE-2026-120006, CVE-2026-118740); Extensions 10.0.14, OpenTelemetry 1.17.0, MessagePack 2.5.307; `docker.md` names 13.6.5 | this PR |
+| 2026-11-16 | `limits.md` scope bullet: declared-or-proposed; `setup.md` adds `CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED` | this PR |
 | 2026-10-19 | README Client Skills Installation: per-repo, `-g` and `--uninstall` curls for bash/PowerShell, switch table; skills table now ten (`ai-memory-context` added) | this PR |
 | 2026-10-18 | README: Not a Code Context Graph section (no rivals named), Contents TOC, banner moved under title, Odin/Kvasir in tagline | this PR |
 | 2026-10-16 | `what-is-special.md`: Cognee row enriched (v1.6.1 research detail) | this PR |

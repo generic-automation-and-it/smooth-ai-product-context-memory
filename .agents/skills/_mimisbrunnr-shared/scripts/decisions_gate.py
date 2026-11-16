@@ -5,10 +5,11 @@ Client-side only. No Host or Application change, no model in the service. The st
 anything here; this script reads a redacted record, asks a decision model whether it has value to any
 target role, and reports per-record scores that a caller may use to hold or mark a record.
 
-Two subcommands:
+Three subcommands:
 
   score   stdin JSON array of records -> per-record scores on stdout
   probe   report availability: disabled | unreachable | model-missing | ok
+  scope   stdin JSON array of records -> per-record scope dimensions on stdout
 
 Design rules that the harness pins, each of which exists because the cheaper version is wrong:
 
@@ -71,6 +72,23 @@ ENV_TIMEOUT = "CONTEXT_MEMORY_DECISIONS_TIMEOUT"
 # Not one of the ten operator settings: a test seam for the ledger cap, documented in
 # `ledger_cap`. It exists because the shipped 5000 cannot be reached over HTTP in a suite.
 ENV_LEDGER_MAX = "CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES"
+
+# Scope classification is its own switch. Deciding a visibility boundary is a different risk from
+# scoring role value, so the value gate never turns it on.
+ENV_SCOPE_ENABLED = "CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED"
+SCOPE_QUESTION_KEY = "scope"
+SCOPE_DIMENSIONS = ("product", "program", "customer", "self")
+SCOPE_CRITERIA = {
+    "product": "Shipped or intended product behaviour, citable as fact",
+    "program": "Programme or plan material, not shipped behaviour",
+    "customer": "Specific to one customer",
+    "self": "A personal preference of the practitioner",
+}
+SCOPE_INSTRUCTIONS = (
+    "Which scope dimension does this record belong to? These are visibility classes, not product "
+    "names: `product` may be cited as shipped fact, `program` is hidden from default recall and is "
+    "never cited as shipped fact."
+)
 
 SCRIPTS = Path(__file__).resolve().parent
 REDACTOR = SCRIPTS / "redact.py"
@@ -179,6 +197,11 @@ def enabled():
     on it would be the one reading nobody asked for. Every other spelling is refused by being off.
     """
     return os.environ.get(ENV_ENABLED, "").lower() == "true"
+
+
+def scope_enabled():
+    """The scope-classification flag, read exactly as `enabled` reads the value gate's."""
+    return os.environ.get(ENV_SCOPE_ENABLED, "").lower() == "true"
 
 
 def config():
@@ -623,9 +646,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
                         "requests do not follow redirects")
 
 
-def call_model(state, roles, settings, rubric_version):
-    """Score one record. Returns scores, passing roles, and the rubric version recorded with them."""
-    body = encode_request(state, roles, settings["model"])
+def _post(body, settings):
+    """Send one encoded request and return its `answers` object, or raise `GateError`.
+
+    Every question type rides the same transport — URL resolution, the bearer header, and the error
+    classification that keeps a hung model apart from a refused one — so a second caller cannot drift
+    from the guards this one already proves.
+    """
     url = resolve_url(settings)
 
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -672,6 +699,13 @@ def call_model(state, roles, settings, rubric_version):
     answers = document.get("answers") if isinstance(document, dict) else None
     if not isinstance(answers, dict):
         raise GateError("bad-response", "the decision response carried no `answers` object")
+    return answers
+
+
+def call_model(state, roles, settings, rubric_version):
+    """Score one record. Returns scores, passing roles, and the rubric version recorded with them."""
+    body = encode_request(state, roles, settings["model"])
+    answers = _post(body, settings)
 
     scores = {}
     for role in roles:
@@ -694,6 +728,80 @@ def call_model(state, roles, settings, rubric_version):
 
     passing = [role for role, value in scores.items() if value > settings["min_probability"]]
     return scores, passing, rubric_version
+
+
+def build_scope_request(state, model):
+    """One request with one `choice` question over the four scope dimensions."""
+    return {
+        "model": model,
+        "state": state,
+        "questions": {
+            SCOPE_QUESTION_KEY: {
+                "type": "choice",
+                "instructions": SCOPE_INSTRUCTIONS,
+                "criteria": dict(SCOPE_CRITERIA),
+            }
+        },
+    }
+
+
+def encode_scope_request(state, model):
+    """The exact bytes `classify_scope` sends, shared with `size_guard_scope`."""
+    return json.dumps(build_scope_request(state, model), ensure_ascii=False).encode("utf-8")
+
+
+def size_guard_scope(state, model):
+    """Refuse an oversize scope request BEFORE it is sent. Never truncate to fit.
+
+    Sized on the request body `classify_scope` sends, not on the record alone:
+    the scope instructions and criteria travel with the record, mirroring `size_guard`.
+    """
+    request_text = encode_scope_request(state, model).decode("utf-8")
+    total = estimate_tokens(request_text)
+    body = len(request_text.encode("utf-8"))
+    if total > MAX_CONTEXT_TOKENS:
+        return (f"request estimates to ~{total} tokens against a {MAX_CONTEXT_TOKENS}-token context "
+                f"({len(request_text)} chars, scope question included)")
+    if body > MAX_BODY_BYTES:
+        return f"request body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
+    return None
+
+
+def classify_scope(state, settings):
+    """Ask the one scope question. Returns `(dimension, probability)` or raises `GateError`.
+
+    The probability returned is the answer's own score for the dimension it chose — the same 0..1
+    measure the value gate's `noul` answers use, so one threshold setting applies to both — and never
+    the answer's `confidence`, which calibrates the model rather than separating these records.
+    """
+    body = encode_scope_request(state, settings["model"])
+    answers = _post(body, settings)
+    answer = answers.get(SCOPE_QUESTION_KEY)
+    if not isinstance(answer, dict) or answer.get("type") != "choice":
+        raise GateError("bad-response", "the scope answer was not a `choice`")
+    probabilities = answer.get("probabilities")
+    if not isinstance(probabilities, dict) or set(probabilities) != set(SCOPE_DIMENSIONS):
+        raise GateError("bad-response", "the scope answer did not score all four dimensions")
+    values = []
+    for dimension in SCOPE_DIMENSIONS:
+        value = probabilities[dimension]
+        # Refused, not clamped, for the reason the `noul` path states: a 1.5 or an `Infinity` is not
+        # a score at all, and clamping it would report a malformed answer as maximally confident.
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise GateError("bad-response", f"scope {dimension!r} carried no numeric probability")
+        try:
+            probability = float(value)
+        except OverflowError:
+            probability = math.inf
+        if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise GateError("bad-response", f"scope {dimension!r} carried a probability outside 0..1")
+        values.append(probability)
+    if abs(sum(values) - 1.0) > 1e-6:
+        raise GateError("bad-response", "the scope answer's probabilities do not sum to 1")
+    chosen = answer.get("choice")
+    if chosen not in SCOPE_DIMENSIONS:
+        raise GateError("bad-response", "the scope answer chose no declared dimension")
+    return chosen, float(probabilities[chosen])
 
 
 # --------------------------------------------------------------------------- attempt ledger
@@ -1330,6 +1438,67 @@ def cmd_probe(args):
     return 0
 
 
+def cmd_scope(args):
+    """Classify each record's scope dimension from stdin. Reports only; nothing is written.
+
+    One `choice` question per record, over the four visibility classes. A failed question is that
+    record's outcome, never a batch failure — the caller keeps the default and discloses it, the same
+    way the value gate skips rather than blocks a capture.
+    """
+    settings = config()
+
+    try:
+        records = json.load(sys.stdin)
+    except ValueError:
+        raise GateError("bad-input", "stdin did not carry a JSON array") from None
+    if not isinstance(records, list):
+        raise GateError("bad-input", "stdin must carry a JSON array of records")
+
+    if not scope_enabled():
+        print(json.dumps({
+            "outcome": "disabled", "model": settings["model"],
+            "endpoint": endpoint_origin(settings["base_url"]), "records": [],
+            "message": f"{ENV_SCOPE_ENABLED} is not 'true'; scope was not decided",
+        }, indent=2))
+        return 0
+
+    # Checked once before any record, for the reason `cmd_score` states: a bad endpoint is a refusal,
+    # not a per-record outcome.
+    resolve_url(settings)
+    redacted, findings = redact_records(records)
+
+    results = []
+    for index, state in enumerate(redacted):
+        oversize = size_guard_scope(state, settings["model"])
+        if oversize:
+            results.append({"index": index, "outcome": "oversize", "detail": oversize,
+                            "dimension": None, "probability": None})
+            continue
+        try:
+            dimension, probability = classify_scope(state, settings)
+        except GateError as exc:
+            results.append({"index": index, "outcome": exc.outcome, "detail": exc.detail,
+                            "dimension": None, "probability": None})
+            continue
+        # The threshold is applied here, not by the caller, so one setting governs both question
+        # types. A below-threshold answer keeps what it nearly chose, so the caller can disclose it.
+        if probability <= settings["min_probability"]:
+            results.append({"index": index, "outcome": "below-threshold",
+                            "candidate": dimension, "dimension": None,
+                            "probability": probability})
+        else:
+            results.append({"index": index, "outcome": "scored",
+                            "dimension": dimension, "probability": probability})
+
+    print(json.dumps({
+        "outcome": "ok", "model": settings["model"],
+        "endpoint": endpoint_origin(settings["base_url"]),
+        "dimensions": list(SCOPE_DIMENSIONS),
+        "redaction": findings, "records": results,
+    }, indent=2))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(prog="decisions_gate")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1342,6 +1511,9 @@ def main():
 
     probe = sub.add_parser("probe", help="report availability")
     probe.set_defaults(func=cmd_probe)
+
+    scope = sub.add_parser("scope", help="classify each record's scope dimension from stdin")
+    scope.set_defaults(func=cmd_scope)
 
     args = parser.parse_args()
     try:
