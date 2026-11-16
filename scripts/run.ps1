@@ -368,6 +368,7 @@ function Initialize-Credentials {
 # absent on purpose: it is not a generated secret, and a hosted endpoint's key is the operator's to set.
 $script:DecisionDefaults = [ordered]@{
     CONTEXT_MEMORY_DECISIONS_ENABLED                       = 'false'
+    CONTEXT_MEMORY_SCOPE_DECISIONS_ENABLED                 = 'false'
     CONTEXT_MEMORY_DECISIONS_BASE_URL                      = 'http://localhost:11434'
     CONTEXT_MEMORY_DECISIONS_PATH                          = '/v1/systemone'
     CONTEXT_MEMORY_DECISIONS_MODEL                         = 'nimble'
